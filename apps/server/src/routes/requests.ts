@@ -702,6 +702,16 @@ requestRoutes.post("/:id/resolve", requireRole("supporter"), async (c) => {
   return c.json({ request: requestSummary(updated), resolutionId });
 });
 
+/** Tier 1+ AI reply draft for the workbench — grounded in articles + precedents. */
+requestRoutes.get("/:id/ai-draft", requireRole("supporter"), async (c) => {
+  const loaded = await loadOwnedRequest(c);
+  if ("error" in loaded) return loaded.error;
+  const { draftReply } = await import("../engine/automation.js");
+  const draft = await draftReply(loaded.request);
+  if (!draft) return c.json({ draft: null, reason: "automation tier 0 or drafting unavailable" });
+  return c.json({ draft });
+});
+
 /** AI precedents: similar solved requests + matched articles for the workbench. */
 requestRoutes.get("/:id/precedents", requireRole("supporter"), async (c) => {
   const loaded = await loadOwnedRequest(c);

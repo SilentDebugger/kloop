@@ -22,6 +22,11 @@ export async function registerWorkers(boss: PgBoss): Promise<void> {
     for (const job of jobs) await considerArticleGeneration(job.data.resolutionId);
   });
 
+  await boss.work<{ requestId: string }>(QUEUES.autoAnswer, { pollingIntervalSeconds: 2 }, async (jobs) => {
+    const { tryAutoAnswer } = await import("../engine/automation.js");
+    for (const job of jobs) await tryAutoAnswer(job.data.requestId);
+  });
+
   // ---- scheduled scans (cron lives in Postgres via pg-boss) ----
 
   await boss.work(QUEUES.clusterScan, { pollingIntervalSeconds: 5 }, async () => {
