@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+/* kloop design language — tokens mirrored from packages/shared/src/tokens.ts */
+@theme {
+  --color-bg: #f4f2ec;
+  --color-surface: #fbfaf7;
+  --color-card: #ffffff;
+  --color-primary: #2e7d5b;
+  --color-primary-dark: #25654a;
+  --color-mint: #e3eee7;
+  --color-mint-strong: #cfe3d6;
+  --color-ink: #1d1b16;
+  --color-ink-secondary: #8a867c;
+  --color-ink-faint: #b4b0a6;
+  --color-chip: #eceae2;
+  --color-line: #e7e4db;
+  --color-note-bg: #fbf3dc;
+  --color-note-label: #a8842c;
+  --color-danger: #b4472f;
+  --color-danger-soft: #f7e9e4;
+  --color-amber: #c29135;
+  --color-amber-soft: #f6ecd4;
+
+  --radius-card: 20px;
+  --radius-inner: 14px;
+  --radius-bubble: 18px;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+
+  --shadow-card: 0 1px 2px rgb(29 27 22 / 0.04), 0 4px 16px rgb(29 27 22 / 0.05);
+  --shadow-float: 0 4px 24px rgb(29 27 22 / 0.12);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg text-ink font-sans antialiased;
+  font-size: 15px;
+  overscroll-behavior-y: none;
+}
+
+/* uppercase section labels ("THIS MIGHT SOLVE IT") */
+.section-label {
+  @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-secondary;
+}
+
+/* thin scrollbars that match the palette */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-up {
+  animation: fade-up 0.18s ease-out both;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.sheet-up {
+  animation: sheet-up 0.22s cubic-bezier(0.32, 0.72, 0.22, 1) both;
+}
+
+/* markdown body inside articles & messages */
+.md-body :is(p, ul, ol) {
+  @apply my-2 leading-relaxed;
+}
+.md-body ul {
+  @apply list-disc pl-5;
+}
+.md-body ol {
+  @apply list-decimal pl-5;
+}
+.md-body li {
+  @apply my-1;
+}
+.md-body :is(h1, h2, h3) {
+  @apply mt-4 mb-1.5 font-bold;
+}
+.md-body h1 {
+  @apply text-lg;
+}
+.md-body h2 {
+  @apply text-base;
+}
+.md-body h3 {
+  @apply text-[15px];
+}
+.md-body code {
+  @apply rounded-md bg-chip px-1.5 py-0.5 font-mono text-[13px];
+}
+.md-body pre {
+  @apply my-2 overflow-x-auto rounded-inner bg-ink p-3 text-[13px] text-white;
+}
+.md-body pre code {
+  @apply bg-transparent p-0 text-inherit;
+}
+.md-body a {
+  @apply text-primary underline underline-offset-2;
+}
+.md-body strong {
+  @apply font-semibold;
+}
+.md-body blockquote {
+  @apply my-2 border-l-2 border-line pl-3 text-ink-secondary;
+}

@@ -190,6 +190,43 @@ await step("global search finds article + request", async () => {
   return `${r.articles.length} articles, ${r.requests.length} requests`;
 });
 
+// --- read-only surfaces the web app depends on ---
+
+await step("insights (admin dashboard)", async () => {
+  const r = await api("/api/insights?days=30", {}, token);
+  if (typeof r.deflection?.rate !== "number") throw new Error("bad insights payload");
+  return `deflection ${Math.round(r.deflection.rate * 100)}%`;
+});
+
+await step("gaps & health", async () => {
+  const r = await api("/api/insights/gaps", {}, token);
+  if (!Array.isArray(r.gaps) || !Array.isArray(r.staleArticles)) throw new Error("bad gaps payload");
+  return `${r.gaps.length} gaps, ${r.staleArticles.length} stale`;
+});
+
+await step("notifications list", async () => {
+  const r = await api("/api/notifications", {}, token);
+  if (!Array.isArray(r.notifications)) throw new Error("bad notifications payload");
+  return `${r.notifications.length} items, ${r.unread} unread`;
+});
+
+await step("org users (admin)", async () => {
+  const r = await api("/api/org/users", {}, token);
+  if (!Array.isArray(r.users) || r.users.length === 0) throw new Error("no users");
+  return `${r.users.length} users`;
+});
+
+await step("integration channels", async () => {
+  const r = await api("/api/integrations/channels", {}, token);
+  if (!r.api?.discoveryUrl) throw new Error("bad channels payload");
+});
+
+await step("review counts", async () => {
+  const r = await api("/api/reviews/counts", {}, token);
+  if (typeof r.counts?.total !== "number") throw new Error("bad counts payload");
+  return `${r.counts.total} pending`;
+});
+
 console.log(`\nkloop smoke @ ${base}\n`);
 console.log(results.join("\n"));
 console.log(failures === 0 ? "\nAll smoke checks passed.\n" : `\n${failures} FAILED.\n`);

@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@kloop/shared": "workspace:*",
     "@tanstack/react-query": "^5.101.2",
     "i18next": "^26.3.4",
     "qrcode": "^1.5.4",
