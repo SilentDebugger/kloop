@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+build/
+.turbo/
+.expo/
+apps/server/static/
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# data volumes (local dev)
+data/
+*.local
+
+# logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+
+# editor
+.idea/
+*.swp
+
+# test artifacts
+coverage/

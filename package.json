@@ -1,0 +1,33 @@
+{
+  "name": "kloop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source, self-hosted request platform that turns every solved problem into living documentation.",
+  "license": "AGPL-3.0",
+  "packageManager": "pnpm@10.31.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo dev --filter=@kloop/server --filter=@kloop/web",
+    "dev:server": "pnpm --filter @kloop/server dev",
+    "dev:web": "pnpm --filter @kloop/web dev",
+    "dev:mobile": "pnpm --filter @kloop/mobile start",
+    "build": "turbo build",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "db:generate": "pnpm --filter @kloop/server db:generate",
+    "db:migrate": "pnpm --filter @kloop/server db:migrate",
+    "seed": "pnpm --filter @kloop/server kloop seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ]
+  }
+}

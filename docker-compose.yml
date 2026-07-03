@@ -1,0 +1,63 @@
+# kloop — production-capable default install.
+#   cp .env.example .env   # edit at least APP_SECRET + PUBLIC_URL
+#   docker compose up -d
+#   docker compose exec api node dist/cli.js admin create
+#
+# Bundles: api (server+web), postgres+pgvector, and (optional, --profile minio) MinIO.
+# Point DATABASE_URL at Supabase/Neon/RDS instead? Use compose.external-db.yml:
+#   docker compose -f docker-compose.yml -f compose.external-db.yml up -d
+
+services:
+  api:
+    build: .
+    image: kloop/server:0.1
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Inside the compose network the bundled DB hostname is `db`.
+      DATABASE_URL: ${DATABASE_URL:-postgres://kloop:kloop@db:5432/kloop}
+      STORAGE_LOCAL_PATH: /data/storage
+      PORT: 8787
+    ports:
+      - "${PORT:-8787}:8787"
+    volumes:
+      - kloop-storage:/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kloop
+      POSTGRES_PASSWORD: kloop
+      POSTGRES_DB: kloop
+    volumes:
+      - kloop-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kloop -d kloop"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional S3-compatible storage. Enable with: docker compose --profile minio up -d
+  # then set STORAGE_DRIVER=s3 and the STORAGE_S3_* vars in .env.
+  minio:
+    image: minio/minio:latest
+    profiles: ["minio"]
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${STORAGE_S3_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - kloop-minio:/data
+
+volumes:
+  kloop-pgdata:
+  kloop-storage:
+  kloop-minio:

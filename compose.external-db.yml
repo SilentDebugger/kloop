@@ -1,0 +1,12 @@
+# Overlay for teams using a managed Postgres (Supabase, Neon, RDS, Cloud SQL...).
+# Drops the bundled database; DATABASE_URL from .env is used as-is.
+#
+#   docker compose -f docker-compose.yml -f compose.external-db.yml up -d
+
+services:
+  api:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env to your managed Postgres}
+    depends_on: !reset []
+
+  db: !reset null

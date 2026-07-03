@@ -1,0 +1,15 @@
+{
+  "name": "create-kloop",
+  "version": "0.1.0",
+  "description": "Interactive setup wizard for kloop — from zero to a running instance in under 10 minutes.",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "bin": {
+    "create-kloop": "./src/index.mjs"
+  },
+  "files": ["src", "templates"],
+  "scripts": {
+    "build": "echo 'create-kloop ships plain ESM'",
+    "typecheck": "echo skip"
+  }
+}
