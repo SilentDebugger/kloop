@@ -12,7 +12,9 @@ services:
     build: .
     image: kloop/server:0.1
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false # first run works without one; see .env.example
     environment:
       # Inside the compose network the bundled DB hostname is `db`.
       DATABASE_URL: ${DATABASE_URL:-postgres://kloop:kloop@db:5432/kloop}

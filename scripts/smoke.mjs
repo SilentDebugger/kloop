@@ -70,7 +70,7 @@ await step("create request", async () => {
     {
       method: "POST",
       body: JSON.stringify({
-        title: `Smoke test request ${Date.now()}`,
+        title: "VPN asks for password after every client update",
         body: "VPN keeps asking for my password since this morning's update.",
       }),
     },
@@ -107,6 +107,8 @@ await step("notifications", async () => {
 
 // --- the knowledge loop: resolve -> capture -> draft -> review -> publish -> deflect ---
 
+let resolutionId = null;
+
 await step("resolve with capture", async () => {
   const r = await api(
     `/api/requests/${requestId}/resolve`,
@@ -121,19 +123,33 @@ await step("resolve with capture", async () => {
     token,
   );
   if (r.request.confirmationState !== "pending") throw new Error("confirmation loop not triggered");
-  return r.resolutionId ? "capture stored" : "no resolution";
+  resolutionId = r.resolutionId;
+  return resolutionId ? "capture stored" : "no resolution";
 });
 
 let reviewItemId = null;
 let draftArticleId = null;
+let alreadyPublished = false;
 
 await step("article draft appears in review inbox", async () => {
+  // Match on the smoke topic (VPN) so seeded demo drafts don't shadow ours.
+  // Repeat runs: the engine refuses to duplicate a pending VPN draft, and once
+  // one is published it takes the "already documented" path instead — both are
+  // correct behavior, so the script accepts a published VPN article too.
   for (let i = 0; i < 30; i++) {
     const r = await api("/api/reviews?kind=draft", {}, token);
-    if (r.items.length > 0) {
-      reviewItemId = r.items[0].id;
-      draftArticleId = r.items[0].articleId;
-      return `"${r.items[0].title}" (confidence ${r.items[0].confidence.toFixed(2)})`;
+    const hit = r.items.find((item) => /vpn/i.test(item.title ?? ""));
+    if (hit) {
+      reviewItemId = hit.id;
+      draftArticleId = hit.articleId;
+      return `"${hit.title}" (confidence ${hit.confidence.toFixed(2)})`;
+    }
+    const s = await api(`/api/search?q=${encodeURIComponent("VPN password update")}`, {}, token);
+    const published = s.articles.find((a) => /vpn.*password|password.*vpn/i.test(a.title));
+    if (published && i >= 5) {
+      draftArticleId = published.id;
+      alreadyPublished = true;
+      return `already documented (${published.kb}) — engine skipped drafting, as designed`;
     }
     await new Promise((res) => setTimeout(res, 1000));
   }
@@ -141,12 +157,14 @@ await step("article draft appears in review inbox", async () => {
 });
 
 await step("draft review payload has blocks + sources", async () => {
+  if (alreadyPublished) return "skipped — already documented";
   const r = await api(`/api/reviews/${reviewItemId}`, {}, token);
   if (!r.proposed?.blocks?.length) throw new Error("no blocks");
   return `${r.proposed.blocks.length} blocks, sources: ${r.sources.join(", ")}`;
 });
 
 await step("approve & publish draft", async () => {
+  if (alreadyPublished) return "skipped — already documented";
   const r = await api(`/api/reviews/${reviewItemId}/approve`, { method: "POST", body: "{}" }, token);
   if (!r.ok) throw new Error("approve failed");
 });

@@ -1,0 +1,11 @@
+kloop — license decision pending.
+
+The documentation (documentation.md §12) leaves the final license open between:
+
+  - AGPL-3.0  — protects against closed-source SaaS forks; anyone offering
+                kloop as a service must publish their changes.
+  - Apache-2.0 — maximally permissive; fastest path to adoption and
+                 contributions from companies with AGPL policies.
+
+package.json files currently declare AGPL-3.0 as the working assumption.
+Replace this file with the chosen LICENSE text before publishing the repo.

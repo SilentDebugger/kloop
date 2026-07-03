@@ -17,7 +17,7 @@ const SUMMARY_PRUNE_THRESHOLD = 0.75;
 const COMPOSITE_THRESHOLD = 0.62;
 const REPROPOSAL_MARGIN = 0.12; // rejected pairs need this much more similarity to re-propose
 
-type Scores = {
+export type Scores = {
   simSummary: number;
   simSymptoms: number;
   simResolution: number;
@@ -26,7 +26,7 @@ type Scores = {
   entityOverlap: number;
 };
 
-function compositeScore(s: Scores): number {
+export function compositeScore(s: Scores): number {
   return (
     0.25 * s.simSummary +
     0.25 * s.simSymptoms +
@@ -37,7 +37,7 @@ function compositeScore(s: Scores): number {
   );
 }
 
-function verdictOf(s: Scores): "merge" | "branch" | "crosslink" | "fork" {
+export function verdictOf(s: Scores): "merge" | "branch" | "crosslink" | "fork" {
   const sym = s.simSymptoms >= 0.72;
   const res = s.simResolution >= 0.72;
   if (sym && res) return "merge"; // duplicate
@@ -99,7 +99,7 @@ async function coRetrieval(orgId: string, articleA: string, articleB: string): P
   return either === 0 ? 0 : together / either;
 }
 
-function tagOverlap(tagsA: string[], tagsB: string[]): number {
+export function tagOverlap(tagsA: string[], tagsB: string[]): number {
   if (tagsA.length === 0 || tagsB.length === 0) return 0;
   const a = new Set(tagsA);
   const intersection = tagsB.filter((t) => a.has(t)).length;

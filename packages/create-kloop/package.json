@@ -7,9 +7,13 @@
   "bin": {
     "create-kloop": "./src/index.mjs"
   },
-  "files": ["src", "templates"],
+  "files": ["src"],
   "scripts": {
     "build": "echo 'create-kloop ships plain ESM'",
     "typecheck": "echo skip"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "pg": "^8.22.0"
   }
 }
