@@ -25,6 +25,10 @@ export function getBoss(): PgBoss {
 export async function bossStart(): Promise<void> {
   const b = getBoss();
   await b.start();
+  const { QUEUES } = await import("./queues.js");
+  for (const queue of Object.values(QUEUES)) {
+    await b.createQueue(queue).catch(() => {}); // idempotent
+  }
   const { registerWorkers } = await import("./register.js");
   await registerWorkers(b);
 }

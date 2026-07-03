@@ -14,6 +14,9 @@ import { wellKnownRoutes } from "../routes/wellKnown.js";
 import { authRoutes } from "../routes/auth.js";
 import { oidcRoutes } from "../routes/oidc.js";
 import { orgRoutes } from "../routes/org.js";
+import { requestRoutes } from "../routes/requests.js";
+import { attachmentRoutes } from "../routes/attachments.js";
+import { notificationRoutes } from "../routes/notifications.js";
 
 export function createApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -59,7 +62,9 @@ export function createApp(): Hono<AppEnv> {
  * the surface easy to audit.
  */
 function registerLazyRoutes(api: Hono<AppEnv>) {
-  void api;
+  api.route("/requests", requestRoutes);
+  api.route("/attachments", attachmentRoutes);
+  api.route("/notifications", notificationRoutes);
 }
 
 /** Serve the built web app (prod/docker). In dev, Vite serves the frontend. */
