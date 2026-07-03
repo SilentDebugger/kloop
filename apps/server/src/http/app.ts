@@ -17,6 +17,7 @@ import { orgRoutes } from "../routes/org.js";
 import { requestRoutes } from "../routes/requests.js";
 import { attachmentRoutes } from "../routes/attachments.js";
 import { notificationRoutes } from "../routes/notifications.js";
+import { searchRoutes } from "../routes/search.js";
 
 export function createApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -65,6 +66,7 @@ function registerLazyRoutes(api: Hono<AppEnv>) {
   api.route("/requests", requestRoutes);
   api.route("/attachments", attachmentRoutes);
   api.route("/notifications", notificationRoutes);
+  api.route("/search", searchRoutes);
 }
 
 /** Serve the built web app (prod/docker). In dev, Vite serves the frontend. */
