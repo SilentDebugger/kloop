@@ -589,6 +589,184 @@ requestRoutes.post("/:id/reopen", async (c) => {
   return c.json({ request: requestSummary(updated) });
 });
 
+// ---------------------------------------------------------------------------
+// Resolution capture (<30s) + precedents
+// ---------------------------------------------------------------------------
+
+/**
+ * "Done — resolve": capture what fixed it (free text / voice / photo / log),
+ * mark the request resolved, trigger the requester confirmation loop, and
+ * feed the knowledge engine (structure -> embed -> article generation).
+ */
+requestRoutes.post("/:id/resolve", requireRole("supporter"), async (c) => {
+  const org = c.get("org");
+  const user = c.get("user");
+  const loaded = await loadOwnedRequest(c);
+  if ("error" in loaded) return loaded.error;
+  const { request } = loaded;
+
+  const body = z
+    .object({
+      rawCaptureText: z.string().max(20_000).default(""),
+      captureKind: z.enum(["text", "voice", "photo", "command"]).default("text"),
+      linkedResolutionId: z.string().uuid().nullable().default(null),
+      attachmentIds: z.array(z.string().uuid()).max(10).default([]),
+      /** capture skipped — resolve without feeding the loop (discouraged, allowed) */
+      skipCapture: z.boolean().default(false),
+    })
+    .parse(await c.req.json());
+
+  if (request.status === "solved") return c.json({ error: "already solved" }, 400);
+
+  let resolutionId: string | null = null;
+  if (!body.skipCapture) {
+    let raw = body.rawCaptureText;
+    let linked: typeof tables.resolutions.$inferSelect | null = null;
+
+    // "same as last time" — inherit the linked resolution's capture when empty
+    if (body.linkedResolutionId) {
+      linked =
+        (await db.query.resolutions.findFirst({
+          where: and(eq(tables.resolutions.id, body.linkedResolutionId), eq(tables.resolutions.orgId, org.id)),
+        })) ?? null;
+      if (linked && !raw.trim()) raw = linked.rawCaptureText;
+    }
+
+    const [resolution] = await db
+      .insert(tables.resolutions)
+      .values({
+        orgId: org.id,
+        requestId: request.id,
+        supporterId: user.id,
+        rawCaptureText: raw,
+        captureKind: body.captureKind,
+        linkedResolutionId: linked?.id ?? null,
+        structuredSummary: linked?.structuredSummary ?? null,
+        articleId: linked?.articleId ?? null,
+      })
+      .returning();
+    resolutionId = resolution.id;
+
+    if (body.attachmentIds.length > 0) {
+      await db
+        .update(tables.attachments)
+        .set({ ownerKind: "resolution", ownerId: resolution.id })
+        .where(
+          and(
+            inArray(tables.attachments.id, body.attachmentIds),
+            eq(tables.attachments.orgId, org.id),
+            eq(tables.attachments.ownerKind, "pending"),
+          ),
+        );
+    }
+
+    await enqueue(QUEUES.structure, { resolutionId: resolution.id });
+
+    if (linked) {
+      // strong recurrence signal
+      await recordEvent(org.id, "user", user.id, "resolution_linked", {
+        resolutionId: resolution.id,
+        linkedTo: linked.id,
+      });
+    }
+  }
+
+  const [updated] = await db
+    .update(tables.requests)
+    .set({
+      status: "handled",
+      claimedBy: request.claimedBy ?? user.id,
+      claimedAt: request.claimedAt ?? new Date(),
+      confirmationState: "pending",
+      unreadForRequester: true,
+      lastActivityAt: new Date(),
+    })
+    .where(eq(tables.requests.id, request.id))
+    .returning();
+
+  await recordEvent(org.id, "user", user.id, "request_resolved", {
+    requestId: request.id,
+    resolutionId,
+    captureKind: body.captureKind,
+    skippedCapture: body.skipCapture,
+  });
+  await notifyUser({
+    orgId: org.id,
+    userId: request.authorId,
+    type: "status_change",
+    title: `Did this fix it? — ${request.title.slice(0, 60)}`,
+    body: "A supporter marked your request as resolved. Confirm to close it.",
+    linkPath: `/requests/${request.id}`,
+  });
+  bus.publish(org.id, { type: "request_updated", data: requestSummary(updated) });
+  return c.json({ request: requestSummary(updated), resolutionId });
+});
+
+/** AI precedents: similar solved requests + matched articles for the workbench. */
+requestRoutes.get("/:id/precedents", requireRole("supporter"), async (c) => {
+  const loaded = await loadOwnedRequest(c);
+  if ("error" in loaded) return loaded.error;
+  const { precedentsFor } = await import("../engine/precedents.js");
+  return c.json(await precedentsFor(loaded.request));
+});
+
+/** "Same as last time" picker: this supporter's recent similar resolutions. */
+requestRoutes.get("/:id/similar-resolutions", requireRole("supporter"), async (c) => {
+  const org = c.get("org");
+  const loaded = await loadOwnedRequest(c);
+  if ("error" in loaded) return loaded.error;
+  const { request } = loaded;
+
+  const { searchResolutions } = await import("../search/hybrid.js");
+  const hits = await searchResolutions(org.id, `${request.title}\n${request.body}`, {
+    vec: (request.embedding as number[] | null) ?? undefined,
+    limit: 5,
+  });
+  if (hits.length === 0) return c.json({ resolutions: [] });
+
+  const rows = await db
+    .select({
+      id: tables.resolutions.id,
+      requestId: tables.resolutions.requestId,
+      structuredSummary: tables.resolutions.structuredSummary,
+      rawCaptureText: tables.resolutions.rawCaptureText,
+      supporterId: tables.resolutions.supporterId,
+      createdAt: tables.resolutions.createdAt,
+    })
+    .from(tables.resolutions)
+    .where(inArray(tables.resolutions.id, hits.map((h) => h.id)));
+
+  const reqRows = await db
+    .select({ id: tables.requests.id, refNumber: tables.requests.refNumber, title: tables.requests.title })
+    .from(tables.requests)
+    .where(inArray(tables.requests.id, rows.map((r) => r.requestId)));
+  const supporters = await db
+    .select({ id: tables.users.id, name: tables.users.name })
+    .from(tables.users)
+    .where(inArray(tables.users.id, [...new Set(rows.map((r) => r.supporterId))]));
+
+  const reqById = Object.fromEntries(reqRows.map((r) => [r.id, r]));
+  const supById = Object.fromEntries(supporters.map((s) => [s.id, s.name]));
+
+  return c.json({
+    resolutions: hits
+      .map((h) => {
+        const r = rows.find((x) => x.id === h.id);
+        if (!r) return null;
+        const req = reqById[r.requestId];
+        return {
+          id: r.id,
+          ref: req ? `REQ-${req.refNumber}` : "",
+          requestTitle: req?.title ?? "",
+          summary: r.structuredSummary ?? r.rawCaptureText.slice(0, 200),
+          supporterName: supById[r.supporterId] ?? null,
+          createdAt: r.createdAt,
+        };
+      })
+      .filter(Boolean),
+  });
+});
+
 requestRoutes.post("/:id/rate", async (c) => {
   const org = c.get("org");
   const user = c.get("user");

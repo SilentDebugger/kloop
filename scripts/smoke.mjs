@@ -105,6 +105,91 @@ await step("notifications", async () => {
   return `${r.unread} unread`;
 });
 
+// --- the knowledge loop: resolve -> capture -> draft -> review -> publish -> deflect ---
+
+await step("resolve with capture", async () => {
+  const r = await api(
+    `/api/requests/${requestId}/resolve`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        rawCaptureText:
+          "Re-installed the VPN profile from Self Service, restarted the client. Root cause: the update invalidates the old profile cert.",
+        captureKind: "text",
+      }),
+    },
+    token,
+  );
+  if (r.request.confirmationState !== "pending") throw new Error("confirmation loop not triggered");
+  return r.resolutionId ? "capture stored" : "no resolution";
+});
+
+let reviewItemId = null;
+let draftArticleId = null;
+
+await step("article draft appears in review inbox", async () => {
+  for (let i = 0; i < 30; i++) {
+    const r = await api("/api/reviews?kind=draft", {}, token);
+    if (r.items.length > 0) {
+      reviewItemId = r.items[0].id;
+      draftArticleId = r.items[0].articleId;
+      return `"${r.items[0].title}" (confidence ${r.items[0].confidence.toFixed(2)})`;
+    }
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  throw new Error("no draft after 30s");
+});
+
+await step("draft review payload has blocks + sources", async () => {
+  const r = await api(`/api/reviews/${reviewItemId}`, {}, token);
+  if (!r.proposed?.blocks?.length) throw new Error("no blocks");
+  return `${r.proposed.blocks.length} blocks, sources: ${r.sources.join(", ")}`;
+});
+
+await step("approve & publish draft", async () => {
+  const r = await api(`/api/reviews/${reviewItemId}/approve`, { method: "POST", body: "{}" }, token);
+  if (!r.ok) throw new Error("approve failed");
+});
+
+await step("published article view + markdown export", async () => {
+  const r = await api(`/api/articles/${draftArticleId}`, {}, token);
+  if (r.article.status !== "published") throw new Error(`status ${r.article.status}`);
+  const md = await fetch(`${base}/api/articles/${draftArticleId}/markdown`, {
+    headers: { authorization: `Bearer ${token}` },
+  }).then((x) => x.text());
+  if (!md.startsWith("# ")) throw new Error("markdown export broken");
+  return `${r.article.kb} · ${md.split("\n")[0].slice(2, 50)}`;
+});
+
+await step("deflection suggests the new article", async () => {
+  for (let i = 0; i < 15; i++) {
+    const r = await api(
+      "/api/deflect",
+      { method: "POST", body: JSON.stringify({ text: "VPN keeps asking for password after update" }) },
+      token,
+    );
+    const hit = r.suggestions.find((s) => s.kind === "article" && s.id === draftArticleId);
+    if (hit) return hit.title.slice(0, 50);
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  throw new Error("article not suggested after 15s");
+});
+
+await step("requester confirms the fix", async () => {
+  const r = await api(`/api/requests/${requestId}/confirm`, { method: "POST", body: JSON.stringify({ fixed: true }) }, token);
+  if (r.request.status !== "solved") throw new Error("not solved");
+});
+
+await step("article feedback", async () => {
+  await api(`/api/articles/${draftArticleId}/feedback`, { method: "POST", body: JSON.stringify({ helpful: true }) }, token);
+});
+
+await step("global search finds article + request", async () => {
+  const r = await api(`/api/search?q=${encodeURIComponent("VPN password")}`, {}, token);
+  if (r.articles.length === 0) throw new Error("no articles in search");
+  return `${r.articles.length} articles, ${r.requests.length} requests`;
+});
+
 console.log(`\nkloop smoke @ ${base}\n`);
 console.log(results.join("\n"));
 console.log(failures === 0 ? "\nAll smoke checks passed.\n" : `\n${failures} FAILED.\n`);
