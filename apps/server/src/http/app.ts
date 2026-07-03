@@ -21,6 +21,7 @@ import { searchRoutes } from "../routes/search.js";
 import { deflectRoutes } from "../routes/deflect.js";
 import { articleRoutes } from "../routes/articles.js";
 import { reviewRoutes } from "../routes/reviews.js";
+import { insightRoutes } from "../routes/insights.js";
 
 export function createApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -73,6 +74,7 @@ function registerLazyRoutes(api: Hono<AppEnv>) {
   api.route("/deflect", deflectRoutes);
   api.route("/articles", articleRoutes);
   api.route("/reviews", reviewRoutes);
+  api.route("/insights", insightRoutes);
 }
 
 /** Serve the built web app (prod/docker). In dev, Vite serves the frontend. */
