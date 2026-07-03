@@ -28,7 +28,8 @@ export class ApiError extends Error {
 }
 
 export type ClientConfig = {
-  baseUrl: string; // e.g. "" (same origin) or "https://support.fjord.io/api"'s origin
+  /** "" for same-origin (web) or a function returning the active server origin (mobile) */
+  baseUrl: string | (() => string);
   getToken?: () => string | null;
   /** org slug header for multi-org servers (mobile) */
   getOrgSlug?: () => string | null;
@@ -36,6 +37,10 @@ export type ClientConfig = {
 
 export class KloopClient {
   constructor(private cfg: ClientConfig) {}
+
+  private base(): string {
+    return typeof this.cfg.baseUrl === "function" ? this.cfg.baseUrl() : this.cfg.baseUrl;
+  }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers: Record<string, string> = {
@@ -47,7 +52,7 @@ export class KloopClient {
     const org = this.cfg.getOrgSlug?.();
     if (org) headers["x-kloop-org"] = org;
 
-    const res = await fetch(`${this.cfg.baseUrl}${path}`, { ...init, headers });
+    const res = await fetch(`${this.base()}${path}`, { ...init, headers });
     if (res.status === 204) return undefined as T;
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & T;
     if (!res.ok) {
@@ -264,7 +269,7 @@ export class KloopClient {
     return this.request("/api/attachments", { method: "POST", body: form });
   }
   attachmentRawUrl(id: string): string {
-    return `${this.cfg.baseUrl}/api/attachments/${id}/raw`;
+    return `${this.base()}/api/attachments/${id}/raw`;
   }
 
   // ---- integrations (admin) ----
@@ -296,6 +301,6 @@ export class KloopClient {
   /** SSE stream URL (EventSource can't set headers — token goes in the query). */
   streamUrl(): string {
     const token = this.cfg.getToken?.();
-    return `${this.cfg.baseUrl}/api/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+    return `${this.base()}/api/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
   }
 }

@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "kloop",
+    "slug": "kloop",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "kloop",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F4F2EC"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.kloop.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Attach photos of the problem to your request.",
+        "NSMicrophoneUsageDescription": "Record a voice note describing the problem or the fix.",
+        "NSPhotoLibraryUsageDescription": "Attach screenshots or photos to your request."
+      }
+    },
+    "android": {
+      "package": "app.kloop.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#F4F2EC",
+        "foregroundImage": "./assets/adaptive-icon.png"
+      },
+      "permissions": ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        { "cameraPermission": "kloop uses the camera to scan workspace QR codes and attach photos." }
+      ],
+      ["expo-image-picker", { "photosPermission": "kloop attaches photos you pick to your requests." }],
+      ["expo-audio", { "microphonePermission": "kloop records voice notes you attach to requests." }],
+      "expo-notifications"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
