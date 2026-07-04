@@ -184,8 +184,8 @@ export class KloopClient {
   }
 
   // ---- deflection & search ----
-  deflect(text: string) {
-    return this.post<{ suggestions: DeflectionSuggestion[] }>("/api/deflect", { text });
+  deflect(text: string, attachmentIds: string[] = []) {
+    return this.post<{ suggestions: DeflectionSuggestion[]; pendingAttachments: number }>("/api/deflect", { text, attachmentIds });
   }
   search(q: string) {
     return this.get<{
@@ -232,6 +232,10 @@ export class KloopClient {
   rejectReview(id: string) {
     return this.post<{ ok: true }>(`/api/reviews/${id}/reject`);
   }
+  /** Merge the reviewed draft into an existing published article — creates a merge proposal for review. */
+  reviewMergeInto(id: string, articleId: string) {
+    return this.post<{ ok: true; mergeReviewItemId: string }>(`/api/reviews/${id}/merge-into`, { articleId });
+  }
 
   // ---- insights ----
   gaps() {
@@ -248,6 +252,26 @@ export class KloopClient {
       knowledge: { published: number; drafts: number; stale: number; clusterCoverage: number };
       recurringIssues: { clusterId: string; label: string | null; covered: boolean; recentRequests: number }[];
       trend: { week: string; requests: number; deflected: number }[];
+      ai: {
+        totalCostUsd: number;
+        calls: number;
+        estimatedCalls: number;
+        cacheSavingsUsd: number;
+        tokens: { input: number; cached: number; output: number; media: number };
+        byModel: {
+          provider: string;
+          model: string;
+          calls: number;
+          costUsd: number;
+          inputTokens: number;
+          cachedTokens: number;
+          outputTokens: number;
+          mediaTokens: number;
+          mediaSeconds: number;
+        }[];
+        byPurpose: { purpose: string; calls: number; costUsd: number }[];
+        byDay: { day: string; calls: number; costUsd: number }[];
+      };
     }>(`/api/insights?days=${days}`);
   }
 
@@ -268,8 +292,10 @@ export class KloopClient {
     form.append("file", file.blob, file.name);
     return this.request("/api/attachments", { method: "POST", body: form });
   }
+  /** Raw media URL. Carries the token in the query — native Image/audio loaders can't set headers. */
   attachmentRawUrl(id: string): string {
-    return `${this.base()}/api/attachments/${id}/raw`;
+    const token = this.cfg.getToken?.();
+    return `${this.base()}/api/attachments/${id}/raw${token ? `?token=${encodeURIComponent(token)}` : ""}`;
   }
 
   // ---- integrations (admin) ----

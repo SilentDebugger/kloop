@@ -99,6 +99,7 @@ export async function considerArticleGeneration(resolutionId: string): Promise<v
       })),
     }),
     json: true,
+    orgId: request.orgId,
     task: "article_draft",
     data: {
       suggestedTitle: request.title,

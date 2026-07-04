@@ -34,7 +34,7 @@ export default function QueueScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}>
         <View style={{ flexDirection: "row", alignItems: "flex-start", paddingTop: 8, paddingBottom: 12 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 13, fontWeight: "600", color: colors.primary }}>{ws?.name}</Text>

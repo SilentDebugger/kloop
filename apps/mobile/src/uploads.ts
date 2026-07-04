@@ -1,17 +1,21 @@
+import { fetch } from "expo/fetch";
+import { File } from "expo-file-system";
 import { activeWorkspace } from "./store/connection";
 
 export type Picked = { uri: string; name: string; type: string };
 
 /**
- * RN-native multipart upload (FormData with file URIs — Blob isn't a thing
- * in React Native the way the web client expects).
+ * Multipart upload via Expo's WinterCG fetch. The old RN-style
+ * `{ uri, name, type }` FormData part is not supported by Expo's FormData
+ * ("Unsupported FormDataPart implementation") — the documented pattern is to
+ * wrap the local URI in an expo-file-system File, which implements the Blob
+ * interface and carries name + MIME type.
  */
 export async function uploadFile(file: Picked): Promise<{ id: string; filename: string; kind: string }> {
   const ws = activeWorkspace();
   if (!ws?.token) throw new Error("not signed in");
   const form = new FormData();
-  // @ts-expect-error React Native FormData accepts {uri,name,type}
-  form.append("file", { uri: file.uri, name: file.name, type: file.type });
+  form.append("file", new File(file.uri) as unknown as Blob, file.name);
   const res = await fetch(`${ws.origin}/api/attachments`, {
     method: "POST",
     headers: { authorization: `Bearer ${ws.token}`, "x-kloop-org": ws.slug },

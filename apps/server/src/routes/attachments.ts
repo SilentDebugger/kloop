@@ -16,6 +16,14 @@ function kindOf(mimeType: string): "image" | "audio" | "file" {
 }
 
 export const attachmentRoutes = new Hono<AppEnv>();
+// media is loaded by <img>/<Image>/audio players that can't set headers — accept ?token= like /api/stream
+attachmentRoutes.use("*", async (c, next) => {
+  const token = c.req.query("token");
+  if (token && !c.req.header("authorization")) {
+    c.req.raw.headers.set("authorization", `Bearer ${token}`);
+  }
+  await next();
+});
 attachmentRoutes.use("*", requireAuth());
 
 /**
@@ -90,7 +98,11 @@ attachmentRoutes.get("/:id", async (c) => {
   });
 });
 
-/** Raw file bytes (local driver). S3 driver clients use the signed URL instead. */
+/**
+ * Raw file bytes (local driver). S3 driver clients use the signed URL instead.
+ * Supports HTTP Range requests — iOS AVPlayer (voice-note playback) probes with
+ * `Range: bytes=0-1` and refuses to play sources whose server ignores ranges.
+ */
 attachmentRoutes.get("/:id/raw", async (c) => {
   const org = c.get("org");
   const attachment = await db.query.attachments.findFirst({
@@ -98,9 +110,29 @@ attachmentRoutes.get("/:id/raw", async (c) => {
   });
   if (!attachment) return c.json({ error: "not found" }, 404);
   const data = await getStorage().get(attachment.storageKey);
-  return c.body(new Uint8Array(data).buffer as ArrayBuffer, 200, {
+  const size = data.length;
+  const baseHeaders = {
     "content-type": attachment.mimeType,
     "content-disposition": `inline; filename="${attachment.filename.replace(/"/g, "")}"`,
     "cache-control": "private, max-age=3600",
-  });
+    "accept-ranges": "bytes",
+  };
+
+  const range = /^bytes=(\d*)-(\d*)$/.exec(c.req.header("range") ?? "");
+  if (range && (range[1] || range[2])) {
+    // "bytes=a-b", "bytes=a-" or suffix "bytes=-n"
+    const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    if (start >= size || start > end) {
+      return c.body(null, 416, { "content-range": `bytes */${size}` });
+    }
+    const chunk = data.subarray(start, end + 1);
+    return c.body(new Uint8Array(chunk).buffer as ArrayBuffer, 206, {
+      ...baseHeaders,
+      "content-range": `bytes ${start}-${end}/${size}`,
+      "content-length": String(chunk.length),
+    });
+  }
+
+  return c.body(new Uint8Array(data).buffer as ArrayBuffer, 200, baseHeaders);
 });

@@ -28,7 +28,7 @@ export default function ReviewsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}>
         <View style={{ paddingTop: 8, paddingBottom: 12 }}>
           <Text style={{ fontSize: 13, fontWeight: "600", color: colors.primary }}>{ws?.name}</Text>
           <PageTitle>Reviews</PageTitle>
@@ -74,9 +74,10 @@ function ReviewCard({ item }: { item: ReviewListItem }) {
 
   const confidenceLabel = item.confidence >= 0.75 ? "high confidence" : item.confidence >= 0.45 ? "medium confidence" : "low confidence";
   const title = item.kind === "stale" ? `${item.kb} · ${item.title ?? "Article"}` : (item.title ?? "Untitled draft");
+  const open = () => router.push(item.kind === "stale" ? `/article/${item.articleId}` : `/review/${item.id}`);
 
   return (
-    <Card style={{ padding: 14, gap: 8 }}>
+    <Card onPress={open} style={{ padding: 14, gap: 8 }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
         <KindBadge kind={item.kind} />
         <Text style={{ fontSize: 13, color: colors.textSecondary }}>{item.kind === "stale" ? (item.context ?? "flagged") : confidenceLabel}</Text>
@@ -89,7 +90,7 @@ function ReviewCard({ item }: { item: ReviewListItem }) {
       {item.kind === "draft" ? (
         <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
           <Button title="Approve" size="sm" style={{ flex: 1 }} loading={approve.isPending} onPress={() => approve.mutate()} />
-          <Button title="Edit" size="sm" variant="secondary" style={{ flex: 1 }} onPress={() => router.push(`/review/${item.id}`)} />
+          <Button title="Read" size="sm" variant="secondary" style={{ flex: 1 }} onPress={open} />
           <Button title="Reject" size="sm" variant="danger" style={{ flex: 1 }} loading={reject.isPending} onPress={() => reject.mutate()} />
         </View>
       ) : item.kind === "stale" ? (

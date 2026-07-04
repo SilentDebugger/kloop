@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import { requireAuth, requireRole } from "../http/middleware.js";
 import type { AppEnv } from "../http/context.js";
 import { gapsAndHealth } from "../engine/clustering.js";
+import { ratesFor } from "../lib/aiUsage.js";
 
 export const insightRoutes = new Hono<AppEnv>();
 insightRoutes.use("*", requireAuth(), requireRole("supporter"));
@@ -79,6 +80,63 @@ insightRoutes.get("/", requireRole("admin"), async (c) => {
     group by 1 order by 1
   `);
 
+  // ---- AI cost analytics ----------------------------------------------------
+  // The ai_usage ledger is append-only, one row per provider API call, with the
+  // exact token counts the provider reported. Aggregating it is the source of
+  // truth — no derived caches to go stale.
+  const aiTotals = await db.execute(sql`
+    select
+      count(*)::int as calls,
+      coalesce(sum(cost_usd), 0) as cost,
+      coalesce(sum(input_tokens), 0)::bigint as input_tokens,
+      coalesce(sum(cached_tokens), 0)::bigint as cached_tokens,
+      coalesce(sum(output_tokens), 0)::bigint as output_tokens,
+      coalesce(sum(image_tokens + audio_tokens), 0)::bigint as media_tokens,
+      count(*) filter (where not exact)::int as estimated_calls
+    from ai_usage
+    where org_id = ${org.id} and created_at > now() - make_interval(days => ${days})
+  `);
+  const ai = aiTotals.rows[0] as Record<string, unknown>;
+
+  const aiByModel = await db.execute(sql`
+    select provider, model, count(*)::int as calls, sum(cost_usd) as cost,
+      sum(input_tokens)::bigint as input_tokens,
+      sum(cached_tokens)::bigint as cached_tokens,
+      sum(output_tokens)::bigint as output_tokens,
+      sum(image_tokens + audio_tokens)::bigint as media_tokens,
+      sum(media_seconds) as media_seconds
+    from ai_usage
+    where org_id = ${org.id} and created_at > now() - make_interval(days => ${days})
+    group by provider, model
+    order by cost desc
+  `);
+
+  const aiByPurpose = await db.execute(sql`
+    select coalesce(purpose, 'other') as purpose, count(*)::int as calls, sum(cost_usd) as cost
+    from ai_usage
+    where org_id = ${org.id} and created_at > now() - make_interval(days => ${days})
+    group by 1
+    order by cost desc
+  `);
+
+  const aiByDay = await db.execute(sql`
+    select date_trunc('day', created_at)::date as day, count(*)::int as calls, sum(cost_usd) as cost
+    from ai_usage
+    where org_id = ${org.id} and created_at > now() - make_interval(days => ${days})
+    group by 1
+    order by 1
+  `);
+
+  // what prompt caching saved: cached tokens billed at the discounted rate
+  // instead of the full input rate
+  let cacheSavingsUsd = 0;
+  for (const r of aiByModel.rows as Record<string, unknown>[]) {
+    const rates = ratesFor(String(r.provider), String(r.model));
+    if (!rates?.inputPerM) continue;
+    const discount = rates.inputPerM - (rates.cachedInputPerM ?? rates.inputPerM);
+    cacheSavingsUsd += (Number(r.cached_tokens ?? 0) / 1e6) * discount;
+  }
+
   return c.json({
     windowDays: days,
     requests: {
@@ -110,5 +168,38 @@ insightRoutes.get("/", requireRole("admin"), async (c) => {
       requests: Number(r.requests),
       deflected: Number(r.deflected),
     })),
+    ai: {
+      totalCostUsd: Number(ai.cost ?? 0),
+      calls: Number(ai.calls ?? 0),
+      estimatedCalls: Number(ai.estimated_calls ?? 0),
+      cacheSavingsUsd,
+      tokens: {
+        input: Number(ai.input_tokens ?? 0),
+        cached: Number(ai.cached_tokens ?? 0),
+        output: Number(ai.output_tokens ?? 0),
+        media: Number(ai.media_tokens ?? 0),
+      },
+      byModel: (aiByModel.rows as Record<string, unknown>[]).map((r) => ({
+        provider: String(r.provider),
+        model: String(r.model),
+        calls: Number(r.calls),
+        costUsd: Number(r.cost ?? 0),
+        inputTokens: Number(r.input_tokens ?? 0),
+        cachedTokens: Number(r.cached_tokens ?? 0),
+        outputTokens: Number(r.output_tokens ?? 0),
+        mediaTokens: Number(r.media_tokens ?? 0),
+        mediaSeconds: Number(r.media_seconds ?? 0),
+      })),
+      byPurpose: (aiByPurpose.rows as Record<string, unknown>[]).map((r) => ({
+        purpose: String(r.purpose),
+        calls: Number(r.calls),
+        costUsd: Number(r.cost ?? 0),
+      })),
+      byDay: (aiByDay.rows as Record<string, unknown>[]).map((r) => ({
+        day: r.day,
+        calls: Number(r.calls),
+        costUsd: Number(r.cost ?? 0),
+      })),
+    },
   });
 });

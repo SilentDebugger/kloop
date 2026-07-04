@@ -94,22 +94,24 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Logo size={26} />
           <span className="text-lg font-bold tracking-tight">kloop</span>
         </div>
-        <nav className="mt-8 flex flex-col gap-1">
-          {sidebarMain.map((item) => (
-            <SidebarLink key={item.to} item={item} />
-          ))}
-        </nav>
-        {sidebarAdmin.length > 0 && (
-          <>
-            <div className="section-label mt-7 px-3">{t("nav.admin")}</div>
-            <nav className="mt-2 flex flex-col gap-1">
-              {sidebarAdmin.map((item) => (
-                <SidebarLink key={item.to} item={item} />
-              ))}
-            </nav>
-          </>
-        )}
-        <div className="mt-auto flex flex-col gap-1">
+        <div className="mt-8 min-h-0 flex-1 overflow-y-auto">
+          <nav className="flex flex-col gap-1">
+            {sidebarMain.map((item) => (
+              <SidebarLink key={item.to} item={item} />
+            ))}
+          </nav>
+          {sidebarAdmin.length > 0 && (
+            <>
+              <div className="section-label mt-7 px-3">{t("nav.admin")}</div>
+              <nav className="mt-2 flex flex-col gap-1">
+                {sidebarAdmin.map((item) => (
+                  <SidebarLink key={item.to} item={item} />
+                ))}
+              </nav>
+            </>
+          )}
+        </div>
+        <div className="mt-4 flex flex-col gap-1">
           <SidebarLink item={{ to: "/notifications", label: "Notifications", icon: IconBell, badge: unread }} />
           {supporter && <SidebarLink item={{ to: "/settings", label: t("nav.settings"), icon: IconGear }} />}
           <UserCard />

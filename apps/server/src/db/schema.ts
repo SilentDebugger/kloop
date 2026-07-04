@@ -12,6 +12,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   customType,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -210,7 +211,7 @@ export const resolutions = pgTable(
     requestId: uuid("request_id").notNull().references(() => requests.id, { onDelete: "cascade" }),
     supporterId: uuid("supporter_id").notNull().references(() => users.id),
     rawCaptureText: text("raw_capture_text").notNull().default(""),
-    captureKind: text("capture_kind").notNull().default("text"), // text | voice | photo | command
+    captureKind: text("capture_kind").notNull().default("text"), // text | voice | photo | command | mixed
     structuredSummary: text("structured_summary"),
     /** requester confirmed the fix → trusted resolution signal */
     trusted: boolean("trusted").notNull().default(false),
@@ -492,6 +493,42 @@ export const webhooks = pgTable("webhooks", {
   lastDeliveryAt: timestamp("last_delivery_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * AI usage ledger — one row per provider API call, with the token counts the
+ * provider itself reported (never client-side estimates unless `exact` is
+ * false). Cost is computed at insert time from the pricing table and stored,
+ * so analytics stay correct even if rates change later; raw counts allow
+ * recomputation.
+ */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(), // openai | gemini | anthropic | ollama
+    model: text("model").notNull(),
+    /** complete | ocr | transcribe | embed_text | embed_media */
+    operation: text("operation").notNull(),
+    /** what the call was for: reply_draft, article_draft, search_query, embed_request, ... */
+    purpose: text("purpose"),
+    /** prompt tokens as reported by the provider (includes cached tokens) */
+    inputTokens: integer("input_tokens").notNull().default(0),
+    /** subset of input tokens served from the provider's prompt cache (billed at the cached rate) */
+    cachedTokens: integer("cached_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    /** image/audio tokens for multimodal embeddings (billed at modality rates) */
+    imageTokens: integer("image_tokens").notNull().default(0),
+    audioTokens: integer("audio_tokens").notNull().default(0),
+    /** audio duration for per-minute-billed transcription (whisper) */
+    mediaSeconds: real("media_seconds").notNull().default(0),
+    costUsd: doublePrecision("cost_usd").notNull().default(0),
+    /** false when the provider reported no usage and counts were estimated */
+    exact: boolean("exact").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_usage_org_created_idx").on(t.orgId, t.createdAt)],
+);
 
 /** Per-org sequential counters (REQ-xxxx, KB-xxx) — bumped atomically. */
 export const counters = pgTable(

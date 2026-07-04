@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { SymbolView } from "expo-symbols";
 import { useRouter } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { colors, radii, type DeflectionSuggestion } from "@kloop/shared";
@@ -9,7 +10,8 @@ import { useDrafts } from "../../src/store/drafts";
 import { useActiveWorkspace } from "../../src/store/connection";
 import { useVoiceNote } from "../../src/recorder";
 import { pickImage, uploadFile } from "../../src/uploads";
-import { Avatar, Button, Card, Chip, Logo, SectionLabel, Spinner } from "../../src/ui";
+import { Avatar, Card, Chip, Logo, SectionLabel, Spinner } from "../../src/ui";
+import { AttachmentTray, type LocalAttachment } from "../../src/ui/attachments";
 
 /** Home — the one-box composer with live deflection ("What's not working?"). */
 export default function HomeScreen() {
@@ -18,7 +20,7 @@ export default function HomeScreen() {
   const { composerText, setComposerText, queue, dequeue } = useDrafts();
   const [text, setText] = useState(composerText);
   const [debounced, setDebounced] = useState("");
-  const [attachments, setAttachments] = useState<{ id: string; filename: string }[]>([]);
+  const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const voice = useVoiceNote();
   const inputRef = useRef<TextInput>(null);
@@ -29,11 +31,15 @@ export default function HomeScreen() {
     return () => clearTimeout(id);
   }, [text, setComposerText]);
 
+  // attachments deflect too (photo of an error screen, voice note); their
+  // OCR/transcription lands async, so re-ask while the server reports pending
+  const attachmentIds = attachments.map((a) => a.id);
   const { data: deflect, isFetching } = useQuery({
-    queryKey: ["deflect", debounced],
-    queryFn: () => api.deflect(debounced),
-    enabled: debounced.length >= 8,
+    queryKey: ["deflect", debounced, attachmentIds.join(",")],
+    queryFn: () => api.deflect(debounced, attachmentIds),
+    enabled: debounced.length >= 8 || attachmentIds.length > 0,
     staleTime: 30_000,
+    refetchInterval: (q) => ((q.state.data?.pendingAttachments ?? 0) > 0 ? 3000 : false),
   });
 
   const send = useMutation({
@@ -71,7 +77,7 @@ export default function HomeScreen() {
           if (note) {
             setUploading(true);
             const a = await uploadFile(note);
-            setAttachments((x) => [...x, { id: a.id, filename: a.filename }]);
+            setAttachments((x) => [...x, { id: a.id, filename: a.filename, kind: "audio", localUri: note.uri, durationMs: note.durationMs }]);
           }
         } else {
           await voice.start();
@@ -82,7 +88,7 @@ export default function HomeScreen() {
       if (picked) {
         setUploading(true);
         const a = await uploadFile(picked);
-        setAttachments((x) => [...x, { id: a.id, filename: a.filename }]);
+        setAttachments((x) => [...x, { id: a.id, filename: a.filename, kind: a.kind, localUri: picked.uri }]);
       }
     } catch {
       /* upload failed — keep composing */
@@ -92,12 +98,12 @@ export default function HomeScreen() {
   };
 
   const suggestions = deflect?.suggestions ?? [];
-  const canSend = text.trim().length >= 3 && !send.isPending;
+  const canSend = text.trim().length >= 3 && !send.isPending && !uploading;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}>
           {/* header: org + avatar */}
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10 }}>
             <Logo size={26} />
@@ -131,25 +137,51 @@ export default function HomeScreen() {
               onChangeText={setText}
               style={{ minHeight: 64, fontSize: 16, color: colors.text, textAlignVertical: "top" }}
             />
-            {attachments.length > 0 && (
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                {attachments.map((a) => (
-                  <Pressable
-                    key={a.id}
-                    onPress={() => setAttachments((x) => x.filter((y) => y.id !== a.id))}
-                    style={{ backgroundColor: colors.mint, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 12 }}
-                  >
-                    <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "500" }}>{a.filename} ✕</Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
+            <AttachmentTray items={attachments} onRemove={(rid) => setAttachments((x) => x.filter((y) => y.id !== rid))} />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Chip label="Camera" onPress={() => void attach("camera")} />
-              <Chip label="Photo" onPress={() => void attach("photo")} />
-              <Chip label={voice.recording ? "Stop ●" : "Voice"} active={voice.recording} onPress={() => void attach("voice")} />
+              <Chip
+                label="Camera"
+                icon={<SymbolView name={{ ios: "camera", android: "photo_camera" }} size={13} tintColor={colors.text} />}
+                onPress={() => void attach("camera")}
+              />
+              <Chip
+                label="Photo"
+                icon={<SymbolView name={{ ios: "photo", android: "image" }} size={13} tintColor={colors.text} />}
+                onPress={() => void attach("photo")}
+              />
+              <Chip
+                label={voice.recording ? "Stop" : "Voice"}
+                active={voice.recording}
+                icon={
+                  <SymbolView
+                    name={voice.recording ? { ios: "stop.fill", android: "stop" } : { ios: "mic.fill", android: "mic" }}
+                    size={13}
+                    tintColor={voice.recording ? "#fff" : colors.text}
+                  />
+                }
+                onPress={() => void attach("voice")}
+              />
               <View style={{ flex: 1 }} />
-              <Button title="Send" size="sm" disabled={!canSend} loading={send.isPending || uploading} onPress={() => send.mutate()} />
+              {/* same round submit as the chat composer — the chips need the width */}
+              <Pressable
+                onPress={() => send.mutate()}
+                disabled={!canSend}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: colors.primary,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  opacity: canSend ? 1 : 0.4,
+                }}
+              >
+                {send.isPending || uploading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <SymbolView name={{ ios: "arrow.up", android: "arrow_upward" }} size={17} weight="semibold" tintColor="#fff" />
+                )}
+              </Pressable>
             </View>
           </View>
 
@@ -185,32 +217,19 @@ export default function HomeScreen() {
 
 function SuggestionCard({ s, draftTitle }: { s: DeflectionSuggestion; draftTitle: string }) {
   const router = useRouter();
-  if (s.kind === "article") {
-    return (
-      <Card
-        onPress={() => router.push({ pathname: "/article/[id]", params: { id: s.id, draftTitle, answer: "1" } })}
-        style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14 }}
-      >
-        <Logo size={22} stroke={4.5} />
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontWeight: "600", fontSize: 15, color: colors.text, lineHeight: 20 }}>{s.title}</Text>
-          <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>
-            Article{s.helpfulPercent != null ? ` · ${s.helpfulPercent}% found this helpful` : ""}
-          </Text>
-        </View>
-        <Text style={{ color: colors.textFaint, fontSize: 18 }}>›</Text>
-      </Card>
-    );
-  }
   return (
-    <Card style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14 }}>
-      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary, marginLeft: 5 }} />
+    <Card
+      onPress={() => router.push({ pathname: "/article/[id]", params: { id: s.id, draftTitle, answer: "1" } })}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14 }}
+    >
+      <Logo size={22} stroke={4.5} />
       <View style={{ flex: 1 }}>
-        <Text style={{ fontWeight: "600", fontSize: 15, color: colors.text, lineHeight: 20 }}>"{s.title}" — solved</Text>
+        <Text style={{ fontWeight: "600", fontSize: 15, color: colors.text, lineHeight: 20 }}>{s.title}</Text>
         <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>
-          Similar request{s.resolutionMinutes != null ? ` · resolved in ${s.resolutionMinutes} min` : ""}
+          Article{s.helpfulPercent != null ? ` · ${s.helpfulPercent}% found this helpful` : ""}
         </Text>
       </View>
+      <Text style={{ color: colors.textFaint, fontSize: 18 }}>›</Text>
     </Card>
   );
 }

@@ -60,6 +60,8 @@ export type ResolutionView = {
   linkedResolutionId: string | null;
   articleId: string | null;
   createdAt: string;
+  supporterName: string | null;
+  attachments: AttachmentRef[];
 };
 
 export type RequestDetail = {
@@ -69,9 +71,15 @@ export type RequestDetail = {
   resolutions: ResolutionView[];
 };
 
-export type DeflectionSuggestion =
-  | { kind: "article"; id: string; kb: string; title: string; summary: string; helpfulPercent: number | null; score: number }
-  | { kind: "solved_request"; id: string; ref: string; title: string; solvedAt: string | null; resolutionMinutes: number | null; score: number };
+export type DeflectionSuggestion = {
+  kind: "article";
+  id: string;
+  kb: string;
+  title: string;
+  summary: string;
+  helpfulPercent: number | null;
+  score: number;
+};
 
 export type ArticleListItem = {
   id: string;

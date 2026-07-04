@@ -36,6 +36,7 @@ export async function handleStructureJob(job: StructureJob): Promise<void> {
           'You clean up helpdesk resolution captures. Output strict JSON: {"summary": string (one sentence, what fixed it), "steps": string[] (imperative steps taken)}. Keep exact identifiers, commands and error codes verbatim.',
         prompt: raw.slice(0, 4000),
         json: true,
+        orgId: resolution.orgId,
         task: "structure_capture",
         data: { raw },
       });

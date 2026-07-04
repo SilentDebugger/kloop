@@ -36,7 +36,7 @@ export function SettingsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120, gap: 10 }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32, gap: 10 }}>
         <View style={{ paddingTop: 8, paddingBottom: 8 }}>
           <PageTitle>Settings</PageTitle>
         </View>

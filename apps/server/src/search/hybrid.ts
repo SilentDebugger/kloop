@@ -14,9 +14,12 @@ function toVectorLiteral(vec: number[]): string {
   return `[${vec.join(",")}]`;
 }
 
-export async function embedQuery(text: string): Promise<number[] | null> {
+export async function embedQuery(text: string, meta?: { orgId?: string; purpose?: string }): Promise<number[] | null> {
   try {
-    const [vec] = await getEmbeddingProvider().embed([text]);
+    const [vec] = await getEmbeddingProvider().embed([text], {
+      orgId: meta?.orgId,
+      purpose: meta?.purpose ?? "search_query",
+    });
     return vec ?? null;
   } catch (err) {
     logger.warn("query embedding failed — falling back to keyword-only search", { err: String(err) });
@@ -48,7 +51,29 @@ async function fts(table: string, orgId: string, query: string, where: string, l
   return res.rows as Row[];
 }
 
-export type HybridHit = { id: string; score: number; similarity?: number };
+export type HybridHit = {
+  id: string;
+  score: number;
+  /** cosine similarity when the hit came from the vector half */
+  similarity?: number;
+  /** true when the hit matched the keyword (full-text) half */
+  keyword?: boolean;
+};
+
+/**
+ * Minimum cosine similarity for a vector-only hit to be presented as a
+ * relevant suggestion (deflection, precedents). pgvector KNN always returns
+ * the nearest rows no matter how far away they are, so without a floor an
+ * unrelated query ("how do i make a coffee") would still surface the org's
+ * printer articles. Calibrated on gemini-embedding-2: on-topic paraphrases
+ * score ~0.75-0.85, unrelated queries ~0.45-0.55. Keyword (full-text) matches
+ * are kept regardless — the user literally typed those words.
+ */
+export const MIN_SUGGESTION_SIMILARITY = 0.62;
+
+export function relevantHits(hits: HybridHit[]): HybridHit[] {
+  return hits.filter((h) => h.keyword || (h.similarity ?? 0) >= MIN_SUGGESTION_SIMILARITY);
+}
 
 async function hybrid(
   table: string,
@@ -65,13 +90,14 @@ async function hybrid(
 
   const fused = rrfFuse([
     vecRows.map((r) => ({ id: String(r.id), extra: { similarity: Number(r.similarity) } })),
-    kwRows.map((r) => ({ id: String(r.id) })),
+    kwRows.map((r) => ({ id: String(r.id), extra: { keyword: true } })),
   ]);
 
   return fused.slice(0, limit).map((f) => ({
     id: f.id,
     score: f.score,
     similarity: typeof f.extra.similarity === "number" ? f.extra.similarity : undefined,
+    keyword: f.extra.keyword === true,
   }));
 }
 
@@ -106,7 +132,7 @@ export async function searchArticles(
   opts: { limit?: number; vec?: number[] | null } = {},
 ): Promise<HybridHit[]> {
   const limit = opts.limit ?? 8;
-  const queryVec = opts.vec !== undefined ? opts.vec : await embedQuery(queryText);
+  const queryVec = opts.vec !== undefined ? opts.vec : await embedQuery(queryText, { orgId });
 
   const [vecRows, kwRows] = await Promise.all([
     queryVec ? knn("articles", orgId, queryVec, "and status = 'published'", limit * 3) : Promise.resolve([]),
@@ -115,12 +141,13 @@ export async function searchArticles(
 
   const fused = rrfFuse([
     vecRows.map((r) => ({ id: String(r.id), extra: { similarity: Number(r.similarity) } })),
-    kwRows.map((r) => ({ id: String(r.id) })),
+    kwRows.map((r) => ({ id: String(r.id), extra: { keyword: true } })),
   ]);
   return fused.slice(0, limit).map((f) => ({
     id: f.id,
     score: f.score,
     similarity: typeof f.extra.similarity === "number" ? f.extra.similarity : undefined,
+    keyword: f.extra.keyword === true,
   }));
 }
 
@@ -131,7 +158,7 @@ export async function searchSolvedRequests(
   opts: { limit?: number; vec?: number[] | null; excludeId?: string } = {},
 ): Promise<HybridHit[]> {
   const limit = opts.limit ?? 8;
-  const vec = opts.vec !== undefined ? opts.vec : await embedQuery(queryText);
+  const vec = opts.vec !== undefined ? opts.vec : await embedQuery(queryText, { orgId });
   // excludeId is validated as a UUID before being inlined into the SQL fragment
   const isUuid = opts.excludeId && /^[0-9a-f-]{36}$/i.test(opts.excludeId);
   const exclude = isUuid ? `and id <> '${opts.excludeId}'` : "";
@@ -145,7 +172,7 @@ export async function searchResolutions(
   opts: { limit?: number; vec?: number[] | null } = {},
 ): Promise<HybridHit[]> {
   const limit = opts.limit ?? 8;
-  const vec = opts.vec !== undefined ? opts.vec : await embedQuery(queryText);
+  const vec = opts.vec !== undefined ? opts.vec : await embedQuery(queryText, { orgId });
   return hybrid("resolutions", orgId, queryText, vec, "", limit);
 }
 
@@ -156,6 +183,6 @@ export async function searchAllRequests(
   opts: { limit?: number; vec?: number[] | null } = {},
 ): Promise<HybridHit[]> {
   const limit = opts.limit ?? 8;
-  const vec = opts.vec !== undefined ? opts.vec : await embedQuery(queryText);
+  const vec = opts.vec !== undefined ? opts.vec : await embedQuery(queryText, { orgId });
   return hybrid("requests", orgId, queryText, vec, "", limit);
 }

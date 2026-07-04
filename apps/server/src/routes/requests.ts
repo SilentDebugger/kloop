@@ -57,6 +57,21 @@ async function loadOwnedRequest(c: Context<AppEnv, any>) {
   return { request } as const;
 }
 
+/** Status events rendered inline in the thread ("Maya is now handling this request"). */
+async function addSystemMessage(orgId: string, requestId: string, body: string): Promise<void> {
+  const [message] = await db
+    .insert(tables.messages)
+    .values({ orgId, requestId, kind: "system", body })
+    .returning();
+  bus.publish(orgId, {
+    type: "message_created",
+    data: {
+      requestId,
+      message: { id: message.id, kind: "system", body, author: null, createdAt: message.createdAt },
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Create (one-box composer / API / email-in adds channel)
 // ---------------------------------------------------------------------------
@@ -232,6 +247,12 @@ requestRoutes.get("/:id", async (c) => {
     .orderBy(tables.messages.createdAt);
   const visibleMsgs = isSupporter ? msgs : msgs.filter((m) => m.kind !== "internal_note");
 
+  const resolutionRows = await db
+    .select()
+    .from(tables.resolutions)
+    .where(eq(tables.resolutions.requestId, request.id))
+    .orderBy(desc(tables.resolutions.createdAt));
+
   const atts = await db
     .select()
     .from(tables.attachments)
@@ -246,21 +267,22 @@ requestRoutes.get("/:id", async (c) => {
                 inArray(tables.attachments.ownerId, msgs.map((m) => m.id)),
               )
             : sql`false`,
+          resolutionRows.length > 0
+            ? and(
+                eq(tables.attachments.ownerKind, "resolution"),
+                inArray(tables.attachments.ownerId, resolutionRows.map((r) => r.id)),
+              )
+            : sql`false`,
         ),
       ),
     );
-
-  const resolutionRows = await db
-    .select()
-    .from(tables.resolutions)
-    .where(eq(tables.resolutions.requestId, request.id))
-    .orderBy(desc(tables.resolutions.createdAt));
 
   const userIds = [
     ...new Set([
       request.authorId,
       ...(request.claimedBy ? [request.claimedBy] : []),
       ...visibleMsgs.map((m) => m.authorId).filter(Boolean),
+      ...resolutionRows.map((r) => r.supporterId),
     ] as string[]),
   ];
   const people = await db.select(userCols).from(tables.users).where(inArray(tables.users.id, userIds));
@@ -311,6 +333,10 @@ requestRoutes.get("/:id", async (c) => {
           linkedResolutionId: r.linkedResolutionId,
           articleId: r.articleId,
           createdAt: r.createdAt,
+          supporterName: byId[r.supporterId]?.name ?? null,
+          attachments: atts
+            .filter((a) => a.ownerKind === "resolution" && a.ownerId === r.id)
+            .map((a) => ({ id: a.id, filename: a.filename, mimeType: a.mimeType, kind: a.kind })),
         }))
       : [],
   });
@@ -329,10 +355,13 @@ requestRoutes.post("/:id/messages", async (c) => {
 
   const body = z
     .object({
-      body: z.string().min(1).max(20_000),
+      body: z.string().max(20_000).default(""),
       kind: z.enum(["message", "internal_note"]).default("message"),
       fromAiDraft: z.boolean().default(false),
       attachmentIds: z.array(z.string().uuid()).max(10).default([]),
+    })
+    .refine((v) => v.body.trim().length > 0 || v.attachmentIds.length > 0, {
+      message: "message body or attachments required",
     })
     .parse(await c.req.json());
 
@@ -379,6 +408,10 @@ requestRoutes.post("/:id/messages", async (c) => {
     }
   }
   await db.update(tables.requests).set(patch).where(eq(tables.requests.id, request.id));
+  if (patch.claimedBy) {
+    // replying to an unclaimed request implicitly claims it — tell the thread
+    await addSystemMessage(org.id, request.id, `${user.name} is now handling this request.`);
+  }
 
   // supporter replies get embedded (mining undocumented answers)
   if (isSupporter && body.kind === "message") await enqueueEmbed("message", message.id);
@@ -434,6 +467,7 @@ requestRoutes.post("/:id/claim", requireRole("supporter"), async (c) => {
     .returning();
 
   await recordEvent(org.id, "user", user.id, "request_claimed", { requestId: request.id });
+  await addSystemMessage(org.id, request.id, `${user.name} is now handling this request.`);
   await notifyUser({
     orgId: org.id,
     userId: request.authorId,
@@ -453,11 +487,13 @@ requestRoutes.post("/:id/assign", requireRole("supporter"), async (c) => {
   const { request } = loaded;
   const body = z.object({ userId: z.string().uuid().nullable() }).parse(await c.req.json());
 
+  let assigneeName: string | null = null;
   if (body.userId) {
     const target = await db.query.users.findFirst({
       where: and(eq(tables.users.id, body.userId), eq(tables.users.orgId, org.id)),
     });
     if (!target || target.role === "requester") return c.json({ error: "invalid assignee" }, 400);
+    assigneeName = target.name;
   }
 
   const [updated] = await db
@@ -472,6 +508,11 @@ requestRoutes.post("/:id/assign", requireRole("supporter"), async (c) => {
     .returning();
 
   await recordEvent(org.id, "user", user.id, "request_assigned", { requestId: request.id, assignee: body.userId });
+  await addSystemMessage(
+    org.id,
+    request.id,
+    assigneeName ? `${assigneeName} is now handling this request.` : "This request went back to the queue.",
+  );
   if (body.userId && body.userId !== user.id) {
     await notifyUser({
       orgId: org.id,
@@ -515,6 +556,7 @@ requestRoutes.post("/:id/confirm", async (c) => {
       .where(eq(tables.resolutions.requestId, request.id));
 
     await recordEvent(org.id, "user", user.id, "request_confirmed", { requestId: request.id });
+    await addSystemMessage(org.id, request.id, `${user.name} confirmed the fix. Request solved.`);
     if (request.claimedBy) {
       await notifyUser({
         orgId: org.id,
@@ -545,6 +587,7 @@ requestRoutes.post("/:id/confirm", async (c) => {
     requestId: request.id,
     wasAutoAnswered: request.autoAnswered,
   });
+  await addSystemMessage(org.id, request.id, `${user.name} reported the fix didn't help yet.`);
   if (request.claimedBy) {
     await notifyUser({
       orgId: org.id,
@@ -585,6 +628,7 @@ requestRoutes.post("/:id/reopen", async (c) => {
     .returning();
 
   await recordEvent(org.id, "user", user.id, "request_reopened", { requestId: request.id });
+  await addSystemMessage(org.id, request.id, `${user.name} reopened this request.`);
   bus.publish(org.id, { type: "request_updated", data: requestSummary(updated) });
   return c.json({ request: requestSummary(updated) });
 });
@@ -608,7 +652,7 @@ requestRoutes.post("/:id/resolve", requireRole("supporter"), async (c) => {
   const body = z
     .object({
       rawCaptureText: z.string().max(20_000).default(""),
-      captureKind: z.enum(["text", "voice", "photo", "command"]).default("text"),
+      captureKind: z.enum(["text", "voice", "photo", "command", "mixed"]).default("text"),
       linkedResolutionId: z.string().uuid().nullable().default(null),
       attachmentIds: z.array(z.string().uuid()).max(10).default([]),
       /** capture skipped — resolve without feeding the loop (discouraged, allowed) */
@@ -690,6 +734,7 @@ requestRoutes.post("/:id/resolve", requireRole("supporter"), async (c) => {
     captureKind: body.captureKind,
     skippedCapture: body.skipCapture,
   });
+  await addSystemMessage(org.id, request.id, `${user.name} marked this as resolved.`);
   await notifyUser({
     orgId: org.id,
     userId: request.authorId,
@@ -727,11 +772,15 @@ requestRoutes.get("/:id/similar-resolutions", requireRole("supporter"), async (c
   if ("error" in loaded) return loaded.error;
   const { request } = loaded;
 
-  const { searchResolutions } = await import("../search/hybrid.js");
-  const hits = await searchResolutions(org.id, `${request.title}\n${request.body}`, {
-    vec: (request.embedding as number[] | null) ?? undefined,
-    limit: 5,
-  });
+  const { searchResolutions, relevantHits } = await import("../search/hybrid.js");
+  // relevantHits drops far-away vector matches — better an empty list than
+  // "top 3 nearest whatever they are"
+  const hits = relevantHits(
+    await searchResolutions(org.id, `${request.title}\n${request.body}`, {
+      vec: (request.embedding as number[] | null) ?? undefined,
+      limit: 8,
+    }),
+  );
   if (hits.length === 0) return c.json({ resolutions: [] });
 
   const rows = await db
@@ -758,23 +807,28 @@ requestRoutes.get("/:id/similar-resolutions", requireRole("supporter"), async (c
   const reqById = Object.fromEntries(reqRows.map((r) => [r.id, r]));
   const supById = Object.fromEntries(supporters.map((s) => [s.id, s.name]));
 
-  return c.json({
-    resolutions: hits
-      .map((h) => {
-        const r = rows.find((x) => x.id === h.id);
-        if (!r) return null;
-        const req = reqById[r.requestId];
-        return {
-          id: r.id,
-          ref: req ? `REQ-${req.refNumber}` : "",
-          requestTitle: req?.title ?? "",
-          summary: r.structuredSummary ?? r.rawCaptureText.slice(0, 200),
-          supporterName: supById[r.supporterId] ?? null,
-          createdAt: r.createdAt,
-        };
-      })
-      .filter(Boolean),
-  });
+  // one entry per source request (a re-solved request has several resolution
+  // rows — hits are score-ordered, so the best one wins), never the request
+  // currently being resolved, at most 3
+  const seenRequests = new Set<string>([request.id]);
+  const resolutions: object[] = [];
+  for (const h of hits) {
+    const r = rows.find((x) => x.id === h.id);
+    if (!r || seenRequests.has(r.requestId)) continue;
+    seenRequests.add(r.requestId);
+    const req = reqById[r.requestId];
+    resolutions.push({
+      id: r.id,
+      ref: req ? `REQ-${req.refNumber}` : "",
+      requestTitle: req?.title ?? "",
+      summary: r.structuredSummary ?? r.rawCaptureText.slice(0, 200),
+      supporterName: supById[r.supporterId] ?? null,
+      createdAt: r.createdAt,
+    });
+    if (resolutions.length >= 3) break;
+  }
+
+  return c.json({ resolutions });
 });
 
 requestRoutes.post("/:id/rate", async (c) => {

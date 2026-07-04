@@ -107,6 +107,24 @@ pnpm test        # engine unit tests (RRF fusion, merge scoring, tier logic, …
 pnpm typecheck
 ```
 
+### Dev URLs & demo accounts
+
+| What | Where |
+| --- | --- |
+| Web app (Vite) | http://localhost:5173 |
+| API | http://localhost:8787 |
+| Mailpit (magic links & notification emails) | http://localhost:8025 |
+| Postgres | `localhost:5433` · user/pass/db `kloop`/`kloop`/`kloop` |
+| Expo Metro | http://localhost:8081 |
+
+Demo accounts (from `pnpm seed`, org **Fjord Logistics IT**) — password is `kloop-demo` for all:
+
+| Email | Role |
+| --- | --- |
+| `admin@fjord.io` | admin |
+| `maya@fjord.io` | supporter |
+| `jonas.weber@fjord.io` | requester |
+
 ### Mobile app
 
 ```bash
@@ -114,6 +132,14 @@ pnpm dev:mobile   # Expo dev server — scan with Expo Go or run a dev build
 ```
 
 In the app, connect to your server by domain (or scan the QR code from **Admin → Integrations**), sign in, done. Multiple workspaces (orgs/servers) are supported with per-org branding from the discovery document at `/.well-known/kloop.json`.
+
+Connecting to your **local dev server** from the connect screen:
+
+- iOS simulator / Android emulator on the same machine: enter `localhost:8787`
+- Physical device via Expo Go: enter `<your-machine-LAN-IP>:8787` (e.g. `192.168.0.34:8787`) — the device must be on the same network
+- Plain `http://` is fine — the connect screen automatically falls back to it for local servers
+
+Then sign in with one of the demo accounts above (requesters get the requester tabs, supporters/admins get the supporter tabs).
 
 ## Repo layout
 

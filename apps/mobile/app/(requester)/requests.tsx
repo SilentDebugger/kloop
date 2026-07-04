@@ -17,7 +17,7 @@ export default function MyRequestsScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
         onScrollBeginDrag={() => void refetch()}
       >
         <View style={{ paddingTop: 8, paddingBottom: 14 }}>
@@ -55,6 +55,7 @@ export default function MyRequestsScreen() {
 
 function Row({ r }: { r: RequestSummary }) {
   const router = useRouter();
+  const unread = r.unreadForRequester && r.status !== "solved";
   const sub =
     r.status === "solved"
       ? r.selfSolvedArticleId
@@ -62,13 +63,18 @@ function Row({ r }: { r: RequestSummary }) {
         : r.confirmationState === "confirmed"
           ? `Solved ${timeAgo(r.solvedAt)} ago · you confirmed the fix`
           : `Solved ${timeAgo(r.solvedAt)} ago`
-      : `Sent ${sentLabel(r.createdAt)}${r.unreadForRequester ? " · new reply" : ""}`;
+      : `Sent ${sentLabel(r.createdAt)}`;
 
+  // unread: bold title + accent "New update" prefix, mail-style — no dots or
+  // pills. Opening the thread patches the cache, so it clears on tap.
   return (
     <Card onPress={() => router.push(`/request/${r.id}`)} style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14 }}>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontWeight: r.unreadForRequester ? "800" : "600", fontSize: 15, color: colors.text, lineHeight: 20 }}>{r.title}</Text>
-        <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>{sub}</Text>
+        <Text style={{ fontWeight: unread ? "800" : "600", fontSize: 15, color: colors.text, lineHeight: 20 }}>{r.title}</Text>
+        <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>
+          {unread && <Text style={{ color: colors.primary, fontWeight: "700" }}>New update · </Text>}
+          {sub}
+        </Text>
       </View>
       <StatusBadge status={r.status} />
     </Card>

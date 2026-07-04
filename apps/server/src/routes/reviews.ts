@@ -188,6 +188,29 @@ reviewRoutes.post("/:id/reject", async (c) => {
       .update(tables.mergeCandidates)
       .set({ status: "rejected", reviewedBy: user.id, reviewedAt: new Date() })
       .where(eq(tables.mergeCandidates.id, item.mergeCandidateId));
+
+    // "keep separate" on a merge that superseded an unpublished draft review
+    // ("merge into existing" flow) — put the draft back in the inbox so it
+    // isn't silently lost
+    const candidate = await db.query.mergeCandidates.findFirst({
+      where: eq(tables.mergeCandidates.id, item.mergeCandidateId),
+    });
+    if (candidate) {
+      const loser = await db.query.articles.findFirst({ where: eq(tables.articles.id, candidate.articleBId) });
+      if (loser?.status === "draft") {
+        await db
+          .update(tables.reviewItems)
+          .set({ status: "pending", reviewedBy: null, reviewedAt: null })
+          .where(
+            and(
+              eq(tables.reviewItems.orgId, org.id),
+              eq(tables.reviewItems.articleId, candidate.articleBId),
+              eq(tables.reviewItems.kind, "draft"),
+              eq(tables.reviewItems.status, "superseded"),
+            ),
+          );
+      }
+    }
   }
 
   if (item.kind === "stale" && item.articleId) {
@@ -201,6 +224,49 @@ reviewRoutes.post("/:id/reject", async (c) => {
   await recordEvent(org.id, "user", user.id, "review_rejected", { reviewItemId: item.id, kind: item.kind });
   bus.publish(org.id, { type: "review_changed", supporterOnly: true, data: { reviewItemId: item.id } });
   return c.json({ ok: true });
+});
+
+/**
+ * "This draft is really KB-xxx": instead of publishing a near-duplicate, spawn
+ * a merge proposal (draft + existing article -> one doc, existing KB number
+ * survives). The draft review item is superseded by the new merge review item;
+ * rejecting that merge later puts the draft back in the inbox.
+ */
+reviewRoutes.post("/:id/merge-into", async (c) => {
+  const org = c.get("org");
+  const user = c.get("user");
+  const body = z.object({ articleId: z.string().uuid() }).parse(await c.req.json());
+
+  const item = await db.query.reviewItems.findFirst({
+    where: and(eq(tables.reviewItems.id, c.req.param("id") ?? ""), eq(tables.reviewItems.orgId, org.id)),
+  });
+  if (!item || item.status !== "pending") return c.json({ error: "not found or already reviewed" }, 404);
+  if ((item.kind !== "draft" && item.kind !== "update") || !item.articleId) {
+    return c.json({ error: "only draft/update reviews can be merged into an article" }, 400);
+  }
+  if (body.articleId === item.articleId) return c.json({ error: "cannot merge an article into itself" }, 400);
+
+  const target = await db.query.articles.findFirst({
+    where: and(eq(tables.articles.id, body.articleId), eq(tables.articles.orgId, org.id)),
+  });
+  if (!target || target.status !== "published") return c.json({ error: "target article not found or not published" }, 404);
+
+  const { proposeManualMerge } = await import("../engine/merge.js");
+  const result = await proposeManualMerge(org.id, body.articleId, item.articleId);
+  if ("error" in result) return c.json({ error: result.error }, 502);
+
+  await db
+    .update(tables.reviewItems)
+    .set({ status: "superseded", reviewedBy: user.id, reviewedAt: new Date() })
+    .where(eq(tables.reviewItems.id, item.id));
+
+  await recordEvent(org.id, "user", user.id, "review_merge_requested", {
+    reviewItemId: item.id,
+    mergeReviewItemId: result.reviewItemId,
+    targetArticleId: body.articleId,
+  });
+  bus.publish(org.id, { type: "review_changed", supporterOnly: true, data: { reviewItemId: item.id } });
+  return c.json({ ok: true, mergeReviewItemId: result.reviewItemId });
 });
 
 /** Full payload for the review screens (draft blocks / merge 3-pane). */
@@ -259,6 +325,42 @@ reviewRoutes.get("/:id", async (c) => {
     currentTitle = currentRev?.title ?? null;
   }
 
+  // similar published articles — lets the reviewer merge instead of publishing a near-duplicate
+  const { searchArticles, relevantHits } = await import("../search/hybrid.js");
+  const simHits = relevantHits(
+    await searchArticles(org.id, `${revision.title}\n${revision.summary}`, {
+      vec: (article.embedding as number[] | null) ?? undefined,
+      limit: 4,
+    }),
+  )
+    .filter((h) => h.id !== article.id)
+    .slice(0, 3);
+  let similarArticles: { id: string; kb: string; title: string; summary: string; similarity: number | null }[] = [];
+  if (simHits.length > 0) {
+    const simRows = await db
+      .select({ id: tables.articles.id, kbNumber: tables.articles.kbNumber, revId: tables.articles.currentRevisionId })
+      .from(tables.articles)
+      .where(inArray(tables.articles.id, simHits.map((h) => h.id)));
+    const simRevs = await db
+      .select({ id: tables.articleRevisions.id, title: tables.articleRevisions.title, summary: tables.articleRevisions.summary })
+      .from(tables.articleRevisions)
+      .where(inArray(tables.articleRevisions.id, simRows.map((r) => r.revId).filter(Boolean) as string[]));
+    const simRevById = Object.fromEntries(simRevs.map((r) => [r.id, r]));
+    similarArticles = simHits.flatMap((h) => {
+      const row = simRows.find((r) => r.id === h.id);
+      if (!row?.revId || !simRevById[row.revId]) return [];
+      return [
+        {
+          id: row.id,
+          kb: `KB-${String(row.kbNumber).padStart(3, "0")}`,
+          title: simRevById[row.revId].title,
+          summary: simRevById[row.revId].summary,
+          similarity: h.similarity ?? null,
+        },
+      ];
+    });
+  }
+
   return c.json({
     item: { id: item.id, kind: item.kind, confidence: item.confidence, context: item.context, createdAt: item.createdAt },
     article: {
@@ -281,5 +383,6 @@ reviewRoutes.get("/:id", async (c) => {
         }
       : null,
     sources: reqs.map((r) => `REQ-${r.refNumber}`),
+    similarArticles,
   });
 });

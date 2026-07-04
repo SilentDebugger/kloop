@@ -77,6 +77,7 @@ export async function tryAutoAnswer(requestId: string): Promise<boolean> {
         'Write a short, friendly auto-answer for a helpdesk request using ONLY the documented steps provided. End by asking the user to confirm whether it solved the problem. Output strict JSON: {"body": string}.',
       prompt: JSON.stringify({ request: { title: request.title, body: request.body.slice(0, 500) }, article: art }),
       json: true,
+      orgId: request.orgId,
       task: "auto_answer",
       data: { articleTitle: art.title, articleSteps: art.steps },
     });
@@ -166,6 +167,7 @@ export async function draftReply(request: typeof tables.requests.$inferSelect): 
         precedent: precedentSummary,
       }),
       json: true,
+      orgId: request.orgId,
       task: "reply_draft",
       data: {
         requesterName: author?.name ?? "there",

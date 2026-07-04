@@ -1,40 +1,72 @@
-import { useState } from "react";
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Link, useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Image,
+  Keyboard,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { BlurView } from "expo-blur";
+import { SymbolView } from "expo-symbols";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { colors, radii, type MessageView, type RequestDetail } from "@kloop/shared";
+import { colors, radii, type MessageView, type RequestDetail, type RequestSummary, type ResolutionView } from "@kloop/shared";
 import { api } from "../../src/api";
 import { clockTime, sentLabel } from "../../src/format";
 import { useActiveWorkspace } from "../../src/store/connection";
 import { pickImage, uploadFile } from "../../src/uploads";
 import { useVoiceNote } from "../../src/recorder";
-import { Button, Card, Chip, SectionLabel, Spinner, StatusBadge } from "../../src/ui";
-import { ResolveSheet } from "../../src/screens/ResolveSheet";
+import { Button, Chip, SectionLabel, Spinner, StatusBadge } from "../../src/ui";
+import { AttachmentTray, AudioChip, ImageViewer, type LocalAttachment } from "../../src/ui/attachments";
 
 /** Request thread — requester confirm loop / supporter workbench in one route. */
 export default function RequestScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const ws = useActiveWorkspace();
   const user = ws?.user;
+  const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data } = useQuery({
     queryKey: ["request", id],
     queryFn: () => api.requestDetail(id),
     enabled: !!id,
     refetchInterval: 20_000,
   });
 
-  if (isLoading || !data) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-        <Spinner />
-      </SafeAreaView>
-    );
-  }
+  const supporterView = user && user.role !== "requester" && data?.request.author?.id !== user.id;
 
-  const supporterView = user && user.role !== "requester" && data.request.author?.id !== user.id;
-  return supporterView ? <Workbench detail={data} /> : <RequesterThread detail={data} />;
+  // Fetching the detail marks the request read on the server, but no SSE event
+  // reaches this very client — patch the cached lists so row + tab badges
+  // clear the moment the thread opens instead of on the next refetch.
+  useEffect(() => {
+    if (!data) return;
+    const flag = supporterView ? "unreadForSupporter" : "unreadForRequester";
+    qc.setQueriesData<{ requests: RequestSummary[] }>({ queryKey: ["requests"] }, (old) =>
+      old ? { ...old, requests: old.requests.map((r) => (r.id === data.request.id ? { ...r, [flag]: false } : r)) } : old,
+    );
+  }, [data, supporterView, qc]);
+
+  // One SafeAreaView for both the loading and loaded states — remounting it
+  // between them produces a one-frame layout jump under the status bar.
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
+      {!data ? (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <Spinner pad={0} />
+        </View>
+      ) : supporterView ? (
+        <Workbench detail={data} />
+      ) : (
+        <RequesterThread detail={data} />
+      )}
+    </SafeAreaView>
+  );
 }
 
 /* ===================================================================== */
@@ -64,10 +96,50 @@ function BackHeader({ title, subtitle, right }: { title: string; subtitle?: stri
   );
 }
 
+/**
+ * Keeps a chat ScrollView pinned to the bottom (WhatsApp-style): opens at the
+ * end, follows new messages and keyboard resizes while the user is near the
+ * bottom, and leaves them alone while they read history further up.
+ *
+ * `ready` stays false until the first scroll-to-end has been applied; the
+ * caller keeps the list invisible until then, so the user never sees the
+ * pre-scroll frame at the top (which read as a jitter when opening a chat).
+ */
+function useStickyScroll() {
+  const ref = useRef<ScrollView>(null);
+  const stick = useRef(true);
+  const first = useRef(true);
+  const [ready, setReady] = useState(false);
+  return {
+    ready,
+    handlers: {
+      ref,
+      scrollEventThrottle: 32,
+      onScroll: (e: { nativeEvent: { contentOffset: { y: number }; contentSize: { height: number }; layoutMeasurement: { height: number } } }) => {
+        const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+        stick.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
+      },
+      onContentSizeChange: () => {
+        if (stick.current) ref.current?.scrollToEnd({ animated: !first.current });
+        if (first.current) {
+          first.current = false;
+          // reveal one frame later, once the non-animated jump has been applied
+          requestAnimationFrame(() => setReady(true));
+        }
+      },
+      onLayout: () => {
+        if (stick.current && !first.current) ref.current?.scrollToEnd({ animated: false });
+      },
+    },
+  };
+}
+
 function RequesterThread({ detail }: { detail: RequestDetail }) {
   const { request, messages } = detail;
   const ws = useActiveWorkspace();
   const qc = useQueryClient();
+  const sticky = useStickyScroll();
+  const [composerH, setComposerH] = useState(80);
 
   const confirm = useMutation({
     mutationFn: (fixed: boolean) => api.confirm(request.id, fixed),
@@ -82,25 +154,30 @@ function RequesterThread({ detail }: { detail: RequestDetail }) {
   const resolverName = request.claimer?.name ?? "Support";
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <BackHeader title={request.title} subtitle={`Sent ${sentLabel(request.createdAt)}`} right={<StatusBadge status={request.status} />} />
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+      <BackHeader title={request.title} subtitle={`Sent ${sentLabel(request.createdAt)}`} right={<StatusBadge status={request.status} />} />
 
-        {/* status timeline */}
-        <View style={{ paddingHorizontal: 20, paddingVertical: 10 }}>
-          <View style={{ height: 3, backgroundColor: colors.border, borderRadius: 2 }}>
-            <View style={{ height: 3, width: `${(reached / 2) * 100}%`, backgroundColor: colors.primary, borderRadius: 2 }} />
-          </View>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
-            {["Sent", "Being handled", "Solved"].map((s, i) => (
-              <Text key={s} style={{ fontSize: 12, fontWeight: "600", color: i <= reached ? colors.primary : colors.textFaint }}>
-                {s}
-              </Text>
-            ))}
-          </View>
+      {/* status timeline */}
+      <View style={{ paddingHorizontal: 20, paddingVertical: 10 }}>
+        <View style={{ height: 3, backgroundColor: colors.border, borderRadius: 2 }}>
+          <View style={{ height: 3, width: `${(reached / 2) * 100}%`, backgroundColor: colors.primary, borderRadius: 2 }} />
         </View>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
+          {["Sent", "Being handled", "Solved"].map((s, i) => (
+            <Text key={s} style={{ fontSize: 12, fontWeight: "600", color: i <= reached ? colors.primary : colors.textFaint }}>
+              {s}
+            </Text>
+          ))}
+        </View>
+      </View>
 
-        <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, gap: 10 }}>
+      <View style={{ flex: 1 }}>
+        <ScrollView
+          {...sticky.handlers}
+          style={{ flex: 1, opacity: sticky.ready ? 1 : 0 }}
+          keyboardDismissMode="interactive"
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: composerH + 12, gap: 10 }}
+        >
           {messages.map((m) => (
             <Bubble key={m.id} m={m} ownId={ws?.user?.id ?? ""} />
           ))}
@@ -127,20 +204,21 @@ function RequesterThread({ detail }: { detail: RequestDetail }) {
           )}
         </ScrollView>
 
-        <Composer requestId={request.id} />
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+        <Composer requestId={request.id} onHeightChange={setComposerH} />
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 /* ===================================================================== */
 
 function Workbench({ detail }: { detail: RequestDetail }) {
-  const { request, messages } = detail;
+  const { request, messages, resolutions } = detail;
   const ws = useActiveWorkspace();
   const qc = useQueryClient();
   const router = useRouter();
-  const [resolveOpen, setResolveOpen] = useState(false);
+  const sticky = useStickyScroll();
+  const [composerH, setComposerH] = useState(120);
 
   const { data: precedents } = useQuery({
     queryKey: ["precedents", request.id],
@@ -160,21 +238,26 @@ function Workbench({ detail }: { detail: RequestDetail }) {
   const matched = precedents?.matchedArticles ?? [];
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <BackHeader
-          title={request.title}
-          subtitle={`${request.ref} · ${request.author?.name ?? ""} · ${request.authorPastRequests ?? 1} past requests`}
-          right={
-            request.status === "open" && !request.claimedBy ? (
-              <Button title="Claim" size="sm" variant="mint" loading={claim.isPending} onPress={() => claim.mutate()} />
-            ) : (
-              <StatusBadge status={request.status === "handled" ? "handled" : request.status} />
-            )
-          }
-        />
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+      <BackHeader
+        title={request.title}
+        subtitle={`${request.ref} · ${request.author?.name ?? ""} · ${request.authorPastRequests ?? 1} past requests`}
+        right={
+          request.status === "open" && !request.claimedBy ? (
+            <Button title="Claim" size="sm" variant="mint" loading={claim.isPending} onPress={() => claim.mutate()} />
+          ) : (
+            <StatusBadge status={request.status === "handled" ? "handled" : request.status} />
+          )
+        }
+      />
 
-        <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, gap: 10 }}>
+      <View style={{ flex: 1 }}>
+        <ScrollView
+          {...sticky.handlers}
+          style={{ flex: 1, opacity: sticky.ready ? 1 : 0 }}
+          keyboardDismissMode="interactive"
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: composerH + 12, gap: 10 }}
+        >
           {(similar.length > 0 || matched.length > 0) && (
             <View style={{ backgroundColor: colors.mint, borderRadius: radii.lg, padding: 14, gap: 8 }}>
               <SectionLabel color={colors.primary}>Precedents · {similar.length} similar solved</SectionLabel>
@@ -202,12 +285,20 @@ function Workbench({ detail }: { detail: RequestDetail }) {
           )}
 
           {messages.map((m) => (
-            <Bubble key={m.id} m={m} ownId={ws?.user?.id ?? ""} supporterView />
+            <Bubble key={m.id} m={m} ownId={ws?.user?.id ?? ""} />
           ))}
 
-          {request.status !== "solved" && (
+          {/* once resolved, the capture replaces the "Mark resolved" button */}
+          {resolutions[0] && (request.confirmationState === "pending" || request.status === "solved") && (
+            <ResolutionCard r={resolutions[0]} />
+          )}
+          {request.status !== "solved" && request.confirmationState !== "pending" && (
             <Pressable
-              onPress={() => (request.claimedBy ? setResolveOpen(true) : claim.mutate(undefined, { onSuccess: () => setResolveOpen(true) }))}
+              onPress={() =>
+                request.claimedBy
+                  ? router.push(`/resolve/${request.id}`)
+                  : claim.mutate(undefined, { onSuccess: () => router.push(`/resolve/${request.id}`) })
+              }
               style={{ alignSelf: "center", backgroundColor: colors.card, borderRadius: 999, paddingVertical: 10, paddingHorizontal: 20, marginTop: 6 }}
             >
               <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 14 }}>✓ Mark resolved</Text>
@@ -220,26 +311,68 @@ function Workbench({ detail }: { detail: RequestDetail }) {
           )}
         </ScrollView>
 
-        <Composer requestId={request.id} supporter />
-        <ResolveSheet
-          open={resolveOpen}
-          onClose={() => setResolveOpen(false)}
-          requestId={request.id}
-          onResolved={() => {
-            setResolveOpen(false);
-            void qc.invalidateQueries({ queryKey: ["request", request.id] });
-            void qc.invalidateQueries({ queryKey: ["requests"] });
-          }}
-        />
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+        <Composer requestId={request.id} supporter onHeightChange={setComposerH} />
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+/**
+ * What the supporter captured when resolving — raw text plus any photos,
+ * voice notes, or files. Shown in the workbench thread while the requester
+ * confirms (and after), where the "Mark resolved" button used to be.
+ */
+function ResolutionCard({ r }: { r: ResolutionView }) {
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const text = r.rawCaptureText.trim() || r.structuredSummary;
+
+  return (
+    <View style={{ backgroundColor: colors.mint, borderRadius: radii.lg, padding: 14, gap: 8 }}>
+      <SectionLabel color={colors.primary}>✓ How it was fixed</SectionLabel>
+      {text ? <Text style={{ fontSize: 15, lineHeight: 21, color: colors.text }}>{text}</Text> : null}
+      {r.attachments.length > 0 && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {r.attachments.map((a) =>
+            a.kind === "image" ? (
+              <Pressable key={a.id} onPress={() => setViewerUri(api.attachmentRawUrl(a.id))}>
+                <Image source={{ uri: api.attachmentRawUrl(a.id) }} style={{ width: 140, height: 100, borderRadius: 10 }} />
+              </Pressable>
+            ) : a.kind === "audio" ? (
+              <AudioChip key={a.id} uri={api.attachmentRawUrl(a.id)} />
+            ) : (
+              <View
+                key={a.id}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                  backgroundColor: colors.card,
+                  borderRadius: 999,
+                  paddingVertical: 5,
+                  paddingHorizontal: 12,
+                  maxWidth: 220,
+                }}
+              >
+                <SymbolView name={{ ios: "paperclip", android: "attach_file" }} size={12} tintColor={colors.text} />
+                <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12, color: colors.text }}>{a.filename}</Text>
+              </View>
+            ),
+          )}
+        </View>
+      )}
+      <Text style={{ fontSize: 12, color: colors.textSecondary }}>
+        {r.supporterName ?? "Support"} · {clockTime(r.createdAt)}
+      </Text>
+      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+    </View>
   );
 }
 
 /* ===================================================================== */
 
-function Bubble({ m, ownId, supporterView }: { m: MessageView; ownId: string; supporterView?: boolean }) {
+function Bubble({ m, ownId }: { m: MessageView; ownId: string }) {
   const router = useRouter();
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
   if (m.kind === "system") {
     return <Text style={{ textAlign: "center", fontSize: 12, color: colors.textFaint, paddingVertical: 2 }}>{m.body}</Text>;
   }
@@ -257,7 +390,7 @@ function Bubble({ m, ownId, supporterView }: { m: MessageView; ownId: string; su
 
   const own = m.author?.id === ownId;
   const meta = [
-    m.author?.name ?? (m.kind === "auto_answer" ? "kloop" : "System"),
+    own ? null : (m.author?.name ?? (m.kind === "auto_answer" ? "kloop" : "System")),
     clockTime(m.createdAt),
     m.fromAiDraft ? "from AI draft, edited" : null,
     m.kind === "auto_answer" ? "auto-answer" : null,
@@ -269,24 +402,40 @@ function Bubble({ m, ownId, supporterView }: { m: MessageView; ownId: string; su
     <View
       style={{
         backgroundColor: own ? colors.primary : colors.card,
-        borderRadius: radii.lg,
-        padding: 14,
-        maxWidth: "92%",
-        alignSelf: supporterView && own ? "flex-end" : "flex-start",
+        borderRadius: radii.bubble,
+        borderBottomRightRadius: own ? 6 : radii.bubble,
+        borderBottomLeftRadius: own ? radii.bubble : 6,
+        padding: 12,
+        maxWidth: "85%",
+        alignSelf: own ? "flex-end" : "flex-start",
       }}
     >
-      <Text style={{ fontSize: 15, lineHeight: 21, color: own ? "#fff" : colors.text }}>{m.body}</Text>
+      {m.body ? <Text style={{ fontSize: 15, lineHeight: 21, color: own ? "#fff" : colors.text }}>{m.body}</Text> : null}
       {m.attachments && m.attachments.length > 0 && (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: m.body ? 8 : 0 }}>
           {m.attachments.map((a) =>
             a.kind === "image" ? (
-              <Image key={a.id} source={{ uri: api.attachmentRawUrl(a.id) }} style={{ width: 140, height: 100, borderRadius: 10 }} />
+              <Pressable key={a.id} onPress={() => setViewerUri(api.attachmentRawUrl(a.id))}>
+                <Image source={{ uri: api.attachmentRawUrl(a.id) }} style={{ width: 140, height: 100, borderRadius: 10 }} />
+              </Pressable>
+            ) : a.kind === "audio" ? (
+              <AudioChip key={a.id} uri={api.attachmentRawUrl(a.id)} onDark={own} />
             ) : (
-              <View key={a.id} style={{ backgroundColor: own ? "rgba(255,255,255,0.2)" : colors.chip, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 12 }}>
-                <Text style={{ fontSize: 12, color: own ? "#fff" : colors.text }}>
-                  {a.kind === "audio" ? "🎙 " : "📎 "}
-                  {a.filename}
-                </Text>
+              <View
+                key={a.id}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                  backgroundColor: own ? "rgba(255,255,255,0.2)" : colors.chip,
+                  borderRadius: 999,
+                  paddingVertical: 5,
+                  paddingHorizontal: 12,
+                  maxWidth: 220,
+                }}
+              >
+                <SymbolView name={{ ios: "paperclip", android: "attach_file" }} size={12} tintColor={own ? "#fff" : colors.text} />
+                <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12, color: own ? "#fff" : colors.text }}>{a.filename}</Text>
               </View>
             ),
           )}
@@ -299,19 +448,45 @@ function Bubble({ m, ownId, supporterView }: { m: MessageView; ownId: string; su
           </Text>
         </Pressable>
       ) : null}
-      <Text style={{ fontSize: 12, color: own ? "rgba(255,255,255,0.7)" : colors.textSecondary, marginTop: 5 }}>{meta}</Text>
+      <Text style={{ fontSize: 11, color: own ? "rgba(255,255,255,0.7)" : colors.textSecondary, marginTop: 4, textAlign: own ? "right" : "left" }}>{meta}</Text>
+      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
   );
 }
 
 /* ===================================================================== */
 
-function Composer({ requestId, supporter }: { requestId: string; supporter?: boolean }) {
+function useKeyboardVisible(): boolean {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () => setVisible(true));
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return visible;
+}
+
+function Composer({
+  requestId,
+  supporter,
+  onHeightChange,
+}: {
+  requestId: string;
+  supporter?: boolean;
+  onHeightChange?: (h: number) => void;
+}) {
   const qc = useQueryClient();
+  const insets = useSafeAreaInsets();
+  const keyboardUp = useKeyboardVisible();
   const [text, setText] = useState("");
   const [note, setNote] = useState(false);
   const [fromDraft, setFromDraft] = useState(false);
-  const [attachments, setAttachments] = useState<{ id: string; filename: string }[]>([]);
+  const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const voice = useVoiceNote();
 
   const [draftWanted, setDraftWanted] = useState(false);
@@ -345,37 +520,60 @@ function Composer({ requestId, supporter }: { requestId: string; supporter?: boo
   });
 
   const attach = async () => {
+    setUploadError(null);
     try {
       const picked = await pickImage(false);
-      if (picked) {
-        const a = await uploadFile(picked);
-        setAttachments((x) => [...x, { id: a.id, filename: a.filename }]);
-      }
-    } catch {
-      /* ignore */
+      if (!picked) return;
+      setUploading(true);
+      const a = await uploadFile(picked);
+      setAttachments((x) => [...x, { id: a.id, filename: a.filename, kind: a.kind, localUri: picked.uri }]);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "Upload failed — try again.");
+    } finally {
+      setUploading(false);
     }
   };
 
   const toggleVoice = async () => {
+    setUploadError(null);
     if (voice.recording) {
       const noteFile = await voice.stop();
       if (noteFile) {
+        setUploading(true);
         try {
           const a = await uploadFile(noteFile);
-          setAttachments((x) => [...x, { id: a.id, filename: a.filename }]);
-        } catch {
-          /* ignore */
+          setAttachments((x) => [...x, { id: a.id, filename: a.filename, kind: "audio", localUri: noteFile.uri, durationMs: noteFile.durationMs }]);
+        } catch (e) {
+          setUploadError(e instanceof Error ? e.message : "Upload failed — try again.");
+        } finally {
+          setUploading(false);
         }
       }
     } else {
-      await voice.start();
+      const ok = await voice.start();
+      if (!ok) setUploadError("Couldn't start recording — check the microphone permission.");
     }
   };
 
-  const canSend = text.trim().length > 0 && !send.isPending;
+  const canSend = (text.trim().length > 0 || attachments.length > 0) && !send.isPending && !uploading;
 
   return (
-    <View style={{ paddingHorizontal: 12, paddingBottom: 10, gap: 8 }}>
+    <BlurView
+      intensity={40}
+      tint="extraLight"
+      onLayout={(e) => onHeightChange?.(e.nativeEvent.layout.height)}
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        paddingHorizontal: 12,
+        paddingTop: 8,
+        paddingBottom: keyboardUp ? 8 : Math.max(insets.bottom, 12),
+        gap: 8,
+        backgroundColor: "rgba(244, 242, 236, 0.72)",
+      }}
+    >
       {supporter && (
         <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 4 }}>
           <Chip
@@ -386,18 +584,9 @@ function Composer({ requestId, supporter }: { requestId: string; supporter?: boo
           <Chip label="Internal note" active={note} onPress={() => setNote((n) => !n)} />
         </View>
       )}
-      {attachments.length > 0 && (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 4 }}>
-          {attachments.map((a) => (
-            <Pressable
-              key={a.id}
-              onPress={() => setAttachments((x) => x.filter((y) => y.id !== a.id))}
-              style={{ backgroundColor: colors.mint, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 12 }}
-            >
-              <Text style={{ color: colors.primary, fontSize: 12 }}>{a.filename} ✕</Text>
-            </Pressable>
-          ))}
-        </View>
+      <AttachmentTray items={attachments} onRemove={(id) => setAttachments((x) => x.filter((y) => y.id !== id))} />
+      {uploadError && (
+        <Text style={{ color: colors.danger, fontSize: 12, paddingHorizontal: 6 }}>{uploadError}</Text>
       )}
       <View
         style={{
@@ -414,25 +603,42 @@ function Composer({ requestId, supporter }: { requestId: string; supporter?: boo
           elevation: 4,
         }}
       >
-        <Pressable onPress={() => void attach()} style={roundBtn(colors.chip)}>
-          <Text style={{ fontSize: 17, color: colors.textSecondary }}>＋</Text>
+        <Pressable onPress={() => void attach()} disabled={uploading} style={roundBtn(colors.chip)}>
+          {uploading ? (
+            <ActivityIndicator size="small" color={colors.textSecondary} />
+          ) : (
+            <SymbolView name={{ ios: "plus", android: "add" }} size={18} tintColor={colors.textSecondary} />
+          )}
         </Pressable>
         <Pressable onPress={() => void toggleVoice()} style={roundBtn(voice.recording ? colors.danger : colors.chip)}>
-          <Text style={{ fontSize: 14, color: voice.recording ? "#fff" : colors.textSecondary }}>🎙</Text>
+          <SymbolView name={{ ios: "mic.fill", android: "mic" }} size={17} tintColor={voice.recording ? "#fff" : colors.textSecondary} />
         </Pressable>
+        {/* auto-grows natively while typing; the explicit height when empty
+            forces the snap back to one line after send (Fabric doesn't
+            re-measure on programmatic clear) */}
         <TextInput
           multiline
           placeholder={note ? "Internal note…" : "Reply…"}
           placeholderTextColor={colors.textFaint}
           value={text}
           onChangeText={setText}
-          style={{ flex: 1, maxHeight: 120, fontSize: 15, color: colors.text, paddingVertical: 9, paddingHorizontal: 4 }}
+          style={{
+            flex: 1,
+            height: text.length === 0 ? 40 : undefined,
+            minHeight: 40,
+            maxHeight: 120,
+            fontSize: 15,
+            lineHeight: 20,
+            color: colors.text,
+            paddingVertical: 10,
+            paddingHorizontal: 4,
+          }}
         />
         <Pressable onPress={() => send.mutate()} disabled={!canSend} style={[roundBtn(colors.primary), { opacity: canSend ? 1 : 0.4 }]}>
-          <Text style={{ fontSize: 16, color: "#fff" }}>↑</Text>
+          <SymbolView name={{ ios: "arrow.up", android: "arrow_upward" }} size={18} weight="semibold" tintColor="#fff" />
         </Pressable>
       </View>
-    </View>
+    </BlurView>
   );
 }
 

@@ -1,35 +1,15 @@
-import { Tabs } from "expo-router";
-import { Text, View } from "react-native";
+import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { useQuery } from "@tanstack/react-query";
 import { colors } from "@kloop/shared";
 import { api } from "../../src/api";
-import { CountBadge } from "../../src/ui";
 
-const tabBarStyle = {
-  position: "absolute" as const,
-  marginHorizontal: 14,
-  marginBottom: 10,
-  borderRadius: 999,
-  backgroundColor: colors.card,
-  borderTopWidth: 0,
-  height: 62,
-  paddingTop: 6,
-  shadowColor: "#1D1B16",
-  shadowOpacity: 0.12,
-  shadowRadius: 16,
-  shadowOffset: { width: 0, height: 4 },
-  elevation: 8,
-};
+const { Trigger } = NativeTabs;
 
-function label(text: string, badge?: number) {
-  return ({ focused }: { focused: boolean }) => (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-      <Text style={{ fontSize: 13, fontWeight: "600", color: focused ? colors.primary : colors.textSecondary }}>{text}</Text>
-      {badge ? <CountBadge n={badge} /> : null}
-    </View>
-  );
-}
-
+/**
+ * Native bottom tabs: UITabBar on iOS (Liquid Glass with minimize-on-scroll
+ * on iOS 26+, classic tab bar below) and Material bottom navigation on Android.
+ * The search tab uses the system search role (separate pill on iOS 26+).
+ */
 export default function SupporterTabs() {
   const { data } = useQuery({
     queryKey: ["review-counts"],
@@ -39,19 +19,24 @@ export default function SupporterTabs() {
   const reviewBadge = data?.counts.total ?? 0;
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle,
-        tabBarShowLabel: true,
-        tabBarIconStyle: { display: "none" },
-        sceneStyle: { backgroundColor: colors.background },
-      }}
-    >
-      <Tabs.Screen name="queue" options={{ tabBarLabel: label("Queue") }} />
-      <Tabs.Screen name="reviews" options={{ tabBarLabel: label("Reviews", reviewBadge) }} />
-      <Tabs.Screen name="search" options={{ tabBarLabel: label("Search") }} />
-      <Tabs.Screen name="my-work" options={{ tabBarLabel: label("My work") }} />
-    </Tabs>
+    <NativeTabs tintColor={colors.primary} minimizeBehavior="onScrollDown" badgeBackgroundColor={colors.primary}>
+      <Trigger name="queue" contentStyle={{ backgroundColor: colors.background }}>
+        <Trigger.Icon sf={{ default: "tray.2", selected: "tray.2.fill" }} md="inbox" />
+        <Trigger.Label>Queue</Trigger.Label>
+      </Trigger>
+      <Trigger name="reviews" contentStyle={{ backgroundColor: colors.background }}>
+        <Trigger.Icon sf={{ default: "checkmark.seal", selected: "checkmark.seal.fill" }} md="rate_review" />
+        <Trigger.Label>Reviews</Trigger.Label>
+        <Trigger.Badge hidden={reviewBadge === 0}>{reviewBadge > 0 ? String(reviewBadge) : undefined}</Trigger.Badge>
+      </Trigger>
+      <Trigger name="my-work" contentStyle={{ backgroundColor: colors.background }}>
+        <Trigger.Icon sf={{ default: "briefcase", selected: "briefcase.fill" }} md="work" />
+        <Trigger.Label>My work</Trigger.Label>
+      </Trigger>
+      <Trigger name="search" role="search" contentStyle={{ backgroundColor: colors.background }}>
+        <Trigger.Icon sf="magnifyingglass" md="search" />
+        <Trigger.Label>Search</Trigger.Label>
+      </Trigger>
+    </NativeTabs>
   );
 }

@@ -1,4 +1,5 @@
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { useState } from "react";
+import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -70,7 +71,7 @@ export default function ReviewDetailScreen() {
           </View>
         </View>
 
-        {isMerge ? <MergeBody payload={payload} /> : <DraftBody payload={payload} />}
+        {isMerge ? <MergeBody payload={payload} /> : <DraftBody reviewId={id} payload={payload} onDone={done} />}
       </ScrollView>
 
       <View style={{ position: "absolute", bottom: 24, left: 16, right: 16, flexDirection: "row", gap: 10 }}>
@@ -92,9 +93,10 @@ export default function ReviewDetailScreen() {
   );
 }
 
-function DraftBody({ payload }: { payload: Record<string, any> }) {
+function DraftBody({ reviewId, payload, onDone }: { reviewId: string; payload: Record<string, any>; onDone: () => void }) {
   const proposed = payload.proposed as { title: string; summary: string; blocks: BlockShape[] };
   const sources = (payload.sources ?? []) as string[];
+  const similar = (payload.similarArticles ?? []) as { id: string; kb: string; title: string; summary: string; similarity: number | null }[];
   return (
     <View style={{ gap: 10 }}>
       {sources.length > 0 && (
@@ -121,6 +123,85 @@ function DraftBody({ payload }: { payload: Record<string, any> }) {
             <MarkdownLite text={b.contentMd} />
           </View>
         </Card>
+      ))}
+
+      {similar.length > 0 && <SimilarArticles reviewId={reviewId} similar={similar} onDone={onDone} />}
+    </View>
+  );
+}
+
+/** Near-duplicate warning: merge the draft into an existing doc instead of publishing both. */
+function SimilarArticles({
+  reviewId,
+  similar,
+  onDone,
+}: {
+  reviewId: string;
+  similar: { id: string; kb: string; title: string; summary: string; similarity: number | null }[];
+  onDone: () => void;
+}) {
+  const [mergingId, setMergingId] = useState<string | null>(null);
+  const merge = useMutation({
+    mutationFn: (articleId: string) => api.reviewMergeInto(reviewId, articleId),
+    onSuccess: () => {
+      Alert.alert("Merge proposed", "A merge proposal was created — you'll find it in the Merges tab.");
+      onDone();
+    },
+    onError: (err) => {
+      setMergingId(null);
+      Alert.alert("Couldn't propose merge", err instanceof Error ? err.message : "Something went wrong.");
+    },
+  });
+
+  const confirm = (a: { id: string; kb: string; title: string }) => {
+    Alert.alert(
+      `Merge into ${a.kb}?`,
+      `kloop will combine this draft with "${a.title}" into one merge proposal for review. ${a.kb} keeps its number.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Propose merge",
+          onPress: () => {
+            setMergingId(a.id);
+            merge.mutate(a.id);
+          },
+        },
+      ],
+    );
+  };
+
+  return (
+    <View style={{ backgroundColor: colors.surface, borderRadius: radii.lg, padding: 14, gap: 10, marginTop: 4 }}>
+      <SectionLabel>Similar existing articles</SectionLabel>
+      <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: -4 }}>
+        Covers the same ground? Merge instead of publishing a duplicate.
+      </Text>
+      {similar.map((a) => (
+        <View key={a.id} style={{ backgroundColor: colors.card, borderRadius: radii.md, padding: 12, gap: 8 }}>
+          <View>
+            <Text style={{ fontWeight: "600", fontSize: 14, color: colors.text }}>
+              {a.kb} · {a.title}
+            </Text>
+            {a.summary ? (
+              <Text numberOfLines={2} style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+                {a.summary}
+              </Text>
+            ) : null}
+            {a.similarity != null ? (
+              <Text style={{ fontSize: 12, color: colors.primary, fontWeight: "600", marginTop: 2 }}>
+                {Math.round(a.similarity * 100)}% similar
+              </Text>
+            ) : null}
+          </View>
+          <Button
+            title={`Merge into ${a.kb}`}
+            size="sm"
+            variant="secondary"
+            loading={merge.isPending && mergingId === a.id}
+            disabled={merge.isPending}
+            onPress={() => confirm(a)}
+          />
+        </View>
       ))}
     </View>
   );

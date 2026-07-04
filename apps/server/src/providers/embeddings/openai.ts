@@ -1,11 +1,12 @@
 import { config } from "../../config.js";
-import { fitDimensions, type EmbeddingProvider } from "./types.js";
+import { recordAiUsage } from "../../lib/aiUsage.js";
+import { fitDimensions, type AiCallMeta, type EmbeddingProvider } from "./types.js";
 
 export class OpenAiEmbeddingProvider implements EmbeddingProvider {
   name = "openai";
   model = config.OPENAI_EMBEDDING_MODEL;
 
-  async embed(texts: string[]): Promise<number[][]> {
+  async embed(texts: string[], meta?: AiCallMeta): Promise<number[][]> {
     const res = await fetch(`${config.OPENAI_BASE_URL}/embeddings`, {
       method: "POST",
       headers: {
@@ -21,7 +22,19 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
       signal: AbortSignal.timeout(60_000),
     });
     if (!res.ok) throw new Error(`openai embeddings ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const data = (await res.json()) as { data: { index: number; embedding: number[] }[] };
+    const data = (await res.json()) as {
+      data: { index: number; embedding: number[] }[];
+      usage?: { prompt_tokens?: number };
+    };
+    recordAiUsage({
+      orgId: meta?.orgId,
+      provider: this.name,
+      model: this.model,
+      operation: "embed_text",
+      purpose: meta?.purpose,
+      inputTokens: data.usage?.prompt_tokens ?? 0,
+      exact: data.usage != null,
+    });
     return data.data
       .sort((a, b) => a.index - b.index)
       .map((d) => fitDimensions(d.embedding, config.EMBEDDING_DIMENSIONS));

@@ -1,8 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { View } from "react-native";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { colors } from "@kloop/shared";
+import { useRealtime } from "../src/realtime";
+import { registerPush } from "../src/push";
 import { useConnection } from "../src/store/connection";
 
 const queryClient = new QueryClient({
@@ -11,21 +15,50 @@ const queryClient = new QueryClient({
 
 export default function RootLayout() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <StatusBar style="dark" />
-      <AuthGate />
-    </QueryClientProvider>
+    <KeyboardProvider>
+      <QueryClientProvider client={queryClient}>
+        <StatusBar style="dark" />
+        <AuthGate />
+      </QueryClientProvider>
+    </KeyboardProvider>
   );
 }
 
+/**
+ * The connection store rehydrates asynchronously from the device keychain.
+ * Subscribe to hydration so the gate re-evaluates the moment it completes —
+ * reading `hasHydrated()` once during render would never trigger a re-render.
+ */
+function useStoreHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(() => useConnection.persist?.hasHydrated?.() ?? true);
+  useEffect(() => {
+    if (hydrated) return;
+    if (useConnection.persist?.hasHydrated?.()) {
+      setHydrated(true);
+      return;
+    }
+    return useConnection.persist?.onFinishHydration?.(() => setHydrated(true));
+  }, [hydrated]);
+  return hydrated;
+}
+
 function AuthGate() {
+  useRealtime();
   const router = useRouter();
   const segments = useSegments();
+  const hydrated = useStoreHydrated();
   const workspaces = useConnection((s) => s.workspaces);
   const activeIndex = useConnection((s) => s.activeIndex);
-  const hydrated = useConnection.persist?.hasHydrated?.() ?? true;
 
   const ws = workspaces[activeIndex] ?? null;
+  const authed = hydrated && !!ws?.token && !!ws?.user;
+  const isRequester = authed && ws?.user?.role === "requester";
+
+  // (re-)register the push token whenever a session is active — login-only
+  // registration missed users who were already signed in
+  useEffect(() => {
+    if (authed) void registerPush();
+  }, [authed]);
 
   // push notification tap → deep link to the linked screen
   useEffect(() => {
@@ -62,12 +95,47 @@ function AuthGate() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, ws?.token, ws?.user?.role, activeIndex, segments[0]]);
 
+  // Hold a blank branded frame until the keychain store has loaded, so a
+  // signed-in user never sees the connect screen flash (and vice versa).
+  if (!hydrated) {
+    return <View style={{ flex: 1, backgroundColor: colors.background }} />;
+  }
+
   return (
     <Stack
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: colors.background },
       }}
-    />
+    >
+      <Stack.Protected guard={isRequester}>
+        <Stack.Screen name="(requester)" />
+      </Stack.Protected>
+      <Stack.Protected guard={authed && !isRequester}>
+        <Stack.Screen name="(supporter)" />
+      </Stack.Protected>
+      <Stack.Protected guard={authed}>
+        <Stack.Screen name="request/[id]" />
+        <Stack.Screen name="article/[id]" />
+        <Stack.Screen name="review/[id]" />
+        {/* native iOS sheet: system slide/backdrop/grabber, Apple-feel resolve capture */}
+        <Stack.Screen
+          name="resolve/[id]"
+          options={{
+            presentation: "formSheet",
+            sheetAllowedDetents: [0.85],
+            sheetGrabberVisible: true,
+            sheetCornerRadius: 24,
+          }}
+        />
+        <Stack.Screen name="kb" />
+        <Stack.Screen name="settings" />
+      </Stack.Protected>
+      <Stack.Protected guard={!authed}>
+        <Stack.Screen name="connect" />
+        <Stack.Screen name="qr-scan" />
+        <Stack.Screen name="login" />
+      </Stack.Protected>
+    </Stack>
   );
 }

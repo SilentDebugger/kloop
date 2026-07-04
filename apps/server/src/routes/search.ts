@@ -20,7 +20,7 @@ searchRoutes.get("/", async (c) => {
   if (!q) return c.json({ articles: [], requests: [], resolutions: [] });
 
   const isSupporter = user.role !== "requester";
-  const vec = await embedQuery(q);
+  const vec = await embedQuery(q, { orgId: org.id });
 
   const [articleHits, requestHits, resolutionHits] = await Promise.all([
     searchArticles(org.id, q, { vec, limit: 8 }),

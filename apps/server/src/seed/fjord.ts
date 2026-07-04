@@ -692,7 +692,7 @@ async function embedEverything(orgId: string): Promise<void> {
   ) => {
     const nonEmpty = rows.filter((r) => r.text.trim());
     if (nonEmpty.length === 0) return;
-    const vecs = await provider.embed(nonEmpty.map((r) => r.text));
+    const vecs = await provider.embed(nonEmpty.map((r) => r.text), { orgId, purpose: "seed" });
     for (let i = 0; i < nonEmpty.length; i++) {
       await db
         .update(table)

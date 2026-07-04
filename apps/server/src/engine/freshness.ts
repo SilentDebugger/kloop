@@ -146,6 +146,7 @@ async function contradictionScan(orgId: string): Promise<number> {
           newResolution: resolution.structuredSummary ?? resolution.rawCaptureText.slice(0, 1500),
         }),
         json: true,
+        orgId: article.orgId,
         task: "update_proposal",
         data: {
           blocks: blocks.map((b) => ({ kind: b.kind, contentMd: b.contentMd })),

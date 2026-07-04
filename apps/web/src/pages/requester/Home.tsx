@@ -190,33 +190,20 @@ export function HomePage() {
 
 function SuggestionCard({ s, draftTitle }: { s: DeflectionSuggestion; draftTitle: string }) {
   const navigate = useNavigate();
-  if (s.kind === "article") {
-    return (
-      <Card
-        onClick={() => navigate(`/answer/${s.id}`, { state: { draftTitle } })}
-        className="flex items-center gap-3.5 p-4"
-        as="button"
-      >
-        <Logo size={22} stroke={4.5} />
-        <span className="min-w-0 flex-1">
-          <span className="block font-semibold leading-snug text-ink">{s.title}</span>
-          <span className="mt-0.5 block text-[13px] text-ink-secondary">
-            Article{s.helpfulPercent != null ? ` · ${s.helpfulPercent}% found this helpful` : ""}
-          </span>
-        </span>
-        <IconChevron size={16} className="shrink-0 text-ink-faint" />
-      </Card>
-    );
-  }
   return (
-    <Card className="flex items-center gap-3.5 p-4">
-      <span className="ml-1 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" />
+    <Card
+      onClick={() => navigate(`/answer/${s.id}`, { state: { draftTitle } })}
+      className="flex items-center gap-3.5 p-4"
+      as="button"
+    >
+      <Logo size={22} stroke={4.5} />
       <span className="min-w-0 flex-1">
-        <span className="block font-semibold leading-snug text-ink">"{s.title}" — solved</span>
+        <span className="block font-semibold leading-snug text-ink">{s.title}</span>
         <span className="mt-0.5 block text-[13px] text-ink-secondary">
-          Similar request{s.resolutionMinutes != null ? ` · resolved in ${s.resolutionMinutes} min` : ""}
+          Article{s.helpfulPercent != null ? ` · ${s.helpfulPercent}% found this helpful` : ""}
         </span>
       </span>
+      <IconChevron size={16} className="shrink-0 text-ink-faint" />
     </Card>
   );
 }

@@ -126,6 +126,7 @@ async function labelAndLinkCluster(orgId: string, clusterId: string): Promise<vo
         system: 'Label this group of similar helpdesk requests. Output strict JSON: {"label": string (3-6 words, lowercase)}.',
         prompt: JSON.stringify(members.map((m) => m.title)),
         json: true,
+        orgId,
         task: "cluster_label",
         data: { titles: members.map((m) => m.title) },
       });

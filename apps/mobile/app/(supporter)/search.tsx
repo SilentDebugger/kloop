@@ -30,7 +30,7 @@ export default function SearchScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
         <View style={{ paddingTop: 8, paddingBottom: 12 }}>
           <PageTitle>Search</PageTitle>
         </View>

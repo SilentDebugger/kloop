@@ -300,7 +300,7 @@ requests(id, org_id, author_id, title, body, status: open|handled|solved,
          cluster_id → clusters)
 
 resolutions(id, request_id, supporter_id, raw_capture_text, capture_kind:
-            text|voice|photo|command, structured_summary, trusted: bool,
+            text|voice|photo|command|mixed, structured_summary, trusted: bool,
             linked_resolution_id,  -- "same as last time"
             embedding vector)
 

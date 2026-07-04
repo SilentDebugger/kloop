@@ -1,4 +1,5 @@
 import { config } from "../../config.js";
+import { recordAiUsage } from "../../lib/aiUsage.js";
 import type { CompleteOptions, LlmProvider } from "./types.js";
 
 /** Fully local inference via Ollama — the data-control option. */
@@ -24,7 +25,18 @@ export class OllamaLlmProvider implements LlmProvider {
       signal: AbortSignal.timeout(300_000),
     });
     if (!res.ok) throw new Error(`ollama ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const data = (await res.json()) as { response: string };
+    const data = (await res.json()) as { response: string; prompt_eval_count?: number; eval_count?: number };
+    // local inference — cost is always $0, tracked for volume stats only
+    recordAiUsage({
+      orgId: opts.orgId,
+      provider: this.name,
+      model: this.model,
+      operation: "complete",
+      purpose: opts.task,
+      inputTokens: data.prompt_eval_count ?? 0,
+      outputTokens: data.eval_count ?? 0,
+      exact: data.prompt_eval_count != null,
+    });
     return data.response;
   }
 

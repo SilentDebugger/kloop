@@ -10,6 +10,8 @@ export interface CompleteOptions {
   json?: boolean;
   maxTokens?: number;
   temperature?: number;
+  /** org the call is billed to — recorded in the ai_usage ledger */
+  orgId?: string | null;
   /**
    * Structured task hint. Real providers ignore it (the prompt carries the
    * instructions); the mock provider switches on it to produce deterministic,
@@ -26,14 +28,20 @@ export interface CompleteOptions {
   data?: Record<string, unknown>;
 }
 
+/** Attribution for the ai_usage ledger (cost analytics). */
+export interface AiCallMeta {
+  orgId?: string | null;
+  purpose?: string;
+}
+
 export interface LlmProvider {
   name: string;
   model: string;
   complete(opts: CompleteOptions): Promise<string>;
   /** Extract text from an image (OCR) if the model supports vision; null otherwise. */
-  ocr?(image: Buffer, mimeType: string): Promise<string | null>;
+  ocr?(image: Buffer, mimeType: string, meta?: AiCallMeta): Promise<string | null>;
   /** Transcribe audio if supported; null otherwise. */
-  transcribe?(audio: Buffer, mimeType: string, filename: string): Promise<string | null>;
+  transcribe?(audio: Buffer, mimeType: string, filename: string, meta?: AiCallMeta): Promise<string | null>;
 }
 
 /** Robust JSON extraction: models occasionally wrap JSON in prose/fences. */

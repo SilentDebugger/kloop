@@ -54,18 +54,21 @@ function vecLiteral(vec: number[]): string {
   return `[${vec.join(",")}]`;
 }
 
-async function embedText(text: string): Promise<{ vec: string; model: string } | null> {
+async function embedText(
+  text: string,
+  meta: { orgId: string; purpose: string },
+): Promise<{ vec: string; model: string } | null> {
   const trimmed = text.trim();
   if (!trimmed) return null;
   const provider = getEmbeddingProvider();
-  const [vec] = await provider.embed([trimmed]);
+  const [vec] = await provider.embed([trimmed], meta);
   return { vec: vecLiteral(vec), model: provider.model };
 }
 
 async function embedRequest(id: string): Promise<void> {
   const row = await db.query.requests.findFirst({ where: eq(tables.requests.id, id) });
   if (!row) return;
-  const out = await embedText(`${row.title}\n${row.body}`);
+  const out = await embedText(`${row.title}\n${row.body}`, { orgId: row.orgId, purpose: "embed_request" });
   await db
     .update(tables.requests)
     .set(out ? { embedding: JSON.parse(out.vec), embeddingModel: out.model, embeddingStatus: "ok" } : { embeddingStatus: "skipped" })
@@ -75,7 +78,10 @@ async function embedRequest(id: string): Promise<void> {
 async function embedResolution(id: string): Promise<void> {
   const row = await db.query.resolutions.findFirst({ where: eq(tables.resolutions.id, id) });
   if (!row) return;
-  const out = await embedText(`${row.structuredSummary ?? ""}\n${row.rawCaptureText}`);
+  const out = await embedText(`${row.structuredSummary ?? ""}\n${row.rawCaptureText}`, {
+    orgId: row.orgId,
+    purpose: "embed_resolution",
+  });
   await db
     .update(tables.resolutions)
     .set(out ? { embedding: JSON.parse(out.vec), embeddingStatus: "ok" } : { embeddingStatus: "skipped" })
@@ -89,7 +95,7 @@ async function embedArticle(id: string): Promise<void> {
     where: eq(tables.articleRevisions.id, row.currentRevisionId),
   });
   if (!rev) return;
-  const out = await embedText(`${rev.title}\n${rev.summary}`);
+  const out = await embedText(`${rev.title}\n${rev.summary}`, { orgId: row.orgId, purpose: "embed_article" });
   await db
     .update(tables.articles)
     .set(out ? { embedding: JSON.parse(out.vec), embeddingModel: out.model, embeddingStatus: "ok" } : { embeddingStatus: "skipped" })
@@ -99,7 +105,10 @@ async function embedArticle(id: string): Promise<void> {
 async function embedArticleBlock(id: string): Promise<void> {
   const row = await db.query.articleBlocks.findFirst({ where: eq(tables.articleBlocks.id, id) });
   if (!row) return;
-  const out = await embedText(`${row.conditionText ?? ""}\n${row.contentMd}`);
+  const out = await embedText(`${row.conditionText ?? ""}\n${row.contentMd}`, {
+    orgId: row.orgId,
+    purpose: "embed_article",
+  });
   await db
     .update(tables.articleBlocks)
     .set(out ? { embedding: JSON.parse(out.vec), embeddingStatus: "ok" } : { embeddingStatus: "skipped" })
@@ -109,7 +118,7 @@ async function embedArticleBlock(id: string): Promise<void> {
 async function embedMessage(id: string): Promise<void> {
   const row = await db.query.messages.findFirst({ where: eq(tables.messages.id, id) });
   if (!row) return;
-  const out = await embedText(row.body);
+  const out = await embedText(row.body, { orgId: row.orgId, purpose: "embed_message" });
   await db
     .update(tables.messages)
     .set(out ? { embedding: JSON.parse(out.vec), embeddingStatus: "ok" } : { embeddingStatus: "skipped" })
@@ -134,15 +143,16 @@ async function embedAttachment(id: string): Promise<void> {
   if (row.kind === "image" || row.kind === "audio") {
     const data = await getStorage().get(row.storageKey);
 
+    const meta = { orgId: row.orgId, purpose: "embed_attachment" };
     if (embedder.embedMedia) {
-      mediaVec = await embedder.embedMedia(data, row.mimeType).catch(() => null);
+      mediaVec = await embedder.embedMedia(data, row.mimeType, meta).catch(() => null);
     }
     if (!extractedText) {
       try {
         if (row.kind === "image" && llm.ocr) {
-          extractedText = (await llm.ocr(data, row.mimeType)) ?? "";
+          extractedText = (await llm.ocr(data, row.mimeType, meta)) ?? "";
         } else if (row.kind === "audio" && llm.transcribe) {
-          extractedText = (await llm.transcribe(data, row.mimeType, row.filename)) ?? "";
+          extractedText = (await llm.transcribe(data, row.mimeType, row.filename, meta)) ?? "";
         }
       } catch (err) {
         logger.warn("attachment text extraction failed", { id, err: String(err) });
@@ -152,7 +162,7 @@ async function embedAttachment(id: string): Promise<void> {
 
   let embedding: number[] | null = mediaVec;
   if (!embedding && extractedText.trim()) {
-    const [vec] = await embedder.embed([extractedText]);
+    const [vec] = await embedder.embed([extractedText], { orgId: row.orgId, purpose: "embed_attachment" });
     embedding = vec;
   }
 
@@ -170,7 +180,10 @@ async function embedAttachment(id: string): Promise<void> {
   if (extractedText && row.ownerKind === "request") {
     const req = await db.query.requests.findFirst({ where: eq(tables.requests.id, row.ownerId) });
     if (req) {
-      const out = await embedText(`${req.title}\n${req.body}\n${extractedText}`);
+      const out = await embedText(`${req.title}\n${req.body}\n${extractedText}`, {
+        orgId: req.orgId,
+        purpose: "embed_request",
+      });
       if (out) {
         await db
           .update(tables.requests)

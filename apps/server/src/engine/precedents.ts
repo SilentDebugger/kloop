@@ -1,6 +1,6 @@
 import { eq, inArray, desc, and } from "drizzle-orm";
 import { db, tables } from "../db/index.js";
-import { searchArticles, searchSolvedRequests } from "../search/hybrid.js";
+import { relevantHits, searchArticles, searchSolvedRequests } from "../search/hybrid.js";
 
 export type Precedents = {
   similarSolved: {
@@ -22,8 +22,8 @@ export async function precedentsFor(request: typeof tables.requests.$inferSelect
   const vec = (request.embedding as number[] | null) ?? undefined;
 
   const [solvedHits, articleHits] = await Promise.all([
-    searchSolvedRequests(request.orgId, queryText, { vec, limit: 3, excludeId: request.id }),
-    searchArticles(request.orgId, queryText, { vec, limit: 2 }),
+    searchSolvedRequests(request.orgId, queryText, { vec, limit: 3, excludeId: request.id }).then(relevantHits),
+    searchArticles(request.orgId, queryText, { vec, limit: 2 }).then(relevantHits),
   ]);
 
   const solvedRows =

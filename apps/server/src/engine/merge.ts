@@ -46,6 +46,18 @@ export function verdictOf(s: Scores): "merge" | "branch" | "crosslink" | "fork" 
   return "fork";
 }
 
+/** Cosine similarity of two articles' summary embeddings (0 when either is missing). */
+async function summarySimilarity(articleA: string, articleB: string): Promise<number> {
+  const res = await db.execute(sql`
+    select 1 - (a.embedding <=> b.embedding) as sim
+    from articles a, articles b
+    where a.id = ${articleA} and b.id = ${articleB}
+      and a.embedding is not null and b.embedding is not null
+  `);
+  const sim = (res.rows[0] as Record<string, unknown> | undefined)?.sim;
+  return sim == null ? 0 : Number(sim);
+}
+
 /** Pairwise block-kind similarity between two articles' current revisions (SQL, HNSW-assisted). */
 async function blockKindSimilarity(articleA: string, articleB: string, kind: string): Promise<number> {
   const res = await db.execute(sql`
@@ -212,12 +224,12 @@ type ProposalJson = {
   confidence: number;
 };
 
-/** LLM proposes; the proposal (blocks + human-readable diff + rationale) lands in review. */
-export async function proposeMerge(candidateId: string): Promise<void> {
+/** LLM proposes; the proposal (blocks + human-readable diff + rationale) lands in review. Returns the review item id. */
+export async function proposeMerge(candidateId: string): Promise<string | null> {
   const candidate = await db.query.mergeCandidates.findFirst({
     where: eq(tables.mergeCandidates.id, candidateId),
   });
-  if (!candidate) return;
+  if (!candidate) return null;
 
   const load = async (articleId: string) => {
     const article = await db.query.articles.findFirst({ where: eq(tables.articles.id, articleId) });
@@ -230,7 +242,7 @@ export async function proposeMerge(candidateId: string): Promise<void> {
     return { article, rev, blocks };
   };
   const [a, b] = await Promise.all([load(candidate.articleAId), load(candidate.articleBId)]);
-  if (!a || !b) return;
+  if (!a || !b) return null;
 
   const asJson = (x: NonNullable<Awaited<ReturnType<typeof load>>>) => ({
     title: x.rev.title,
@@ -249,13 +261,14 @@ export async function proposeMerge(candidateId: string): Promise<void> {
         `The detected verdict is "${candidate.verdict}": for "merge" combine everything; for "branch" merge symptoms but keep both resolutions as branches with conditionText describing when each applies; for "fork" produce a parent overview with scoped sections. Never invent steps.`,
       prompt: JSON.stringify({ articleA: asJson(a), articleB: asJson(b) }),
       json: true,
+      orgId: candidate.orgId,
       task: "merge_proposal",
       data: { a: asJson(a), b: asJson(b) },
     });
     proposal = extractJson<ProposalJson>(raw);
   } catch (err) {
     logger.error("merge proposal failed", { candidateId, err: String(err) });
-    return;
+    return null;
   }
 
   await db
@@ -281,6 +294,85 @@ export async function proposeMerge(candidateId: string): Promise<void> {
     compositeScore: candidate.compositeScore,
   });
   await notifySupportersOfReviewItem(candidate.orgId, `Merge proposal: ${a.rev.title.slice(0, 60)}`, item.id);
+  return item.id;
+}
+
+/**
+ * Reviewer-initiated merge ("this draft is really KB-xxx"): skips the
+ * composite-score gate — a human already made the call — but still runs the
+ * LLM proposal and lands in the review inbox like any scanned merge.
+ * `survivorId` keeps its KB number; `mergeFromId` (typically an unpublished
+ * draft) is tombstoned when the merge is approved.
+ */
+export async function proposeManualMerge(
+  orgId: string,
+  survivorId: string,
+  mergeFromId: string,
+): Promise<{ reviewItemId: string } | { error: string }> {
+  const [survivor, other] = await Promise.all([
+    db.query.articles.findFirst({ where: and(eq(tables.articles.id, survivorId), eq(tables.articles.orgId, orgId)) }),
+    db.query.articles.findFirst({ where: and(eq(tables.articles.id, mergeFromId), eq(tables.articles.orgId, orgId)) }),
+  ]);
+  if (!survivor || !other) return { error: "article not found" };
+  if (!survivor.currentRevisionId || !other.currentRevisionId) return { error: "article has no content yet" };
+
+  const [simSummary, simSymptoms, simResolution, clusters, coRet] = await Promise.all([
+    summarySimilarity(survivorId, mergeFromId),
+    blockKindSimilarity(survivorId, mergeFromId, "symptoms"),
+    blockKindSimilarity(survivorId, mergeFromId, "resolution"),
+    clusterOverlap(orgId, survivorId, mergeFromId),
+    coRetrieval(orgId, survivorId, mergeFromId),
+  ]);
+  const scores: Scores = {
+    simSummary,
+    simSymptoms,
+    simResolution,
+    clusterOverlap: clusters,
+    coRetrieval: coRet,
+    entityOverlap: tagOverlap(survivor.tags, other.tags),
+  };
+  // the human says these cover the same problem — keep "branch" (different
+  // fixes stay as conditioned branches) but never downgrade to crosslink/fork
+  const auto = verdictOf(scores);
+  const verdict = auto === "branch" ? "branch" : "merge";
+
+  const existing = await db.query.mergeCandidates.findFirst({
+    where: or(
+      and(eq(tables.mergeCandidates.articleAId, survivorId), eq(tables.mergeCandidates.articleBId, mergeFromId)),
+      and(eq(tables.mergeCandidates.articleAId, mergeFromId), eq(tables.mergeCandidates.articleBId, survivorId)),
+    ),
+  });
+  if (existing?.status === "proposed") {
+    const pendingItem = await db.query.reviewItems.findFirst({
+      where: and(
+        eq(tables.reviewItems.mergeCandidateId, existing.id),
+        eq(tables.reviewItems.status, "pending"),
+      ),
+    });
+    if (pendingItem) return { reviewItemId: pendingItem.id };
+  }
+
+  const values = {
+    orgId,
+    articleAId: survivorId,
+    articleBId: mergeFromId,
+    scores: scores as unknown as Record<string, number>,
+    compositeScore: compositeScore(scores),
+    status: "proposed" as const,
+    verdict,
+  };
+  let candidateId: string;
+  if (existing) {
+    await db.update(tables.mergeCandidates).set(values).where(eq(tables.mergeCandidates.id, existing.id));
+    candidateId = existing.id;
+  } else {
+    const [candidate] = await db.insert(tables.mergeCandidates).values(values).returning();
+    candidateId = candidate.id;
+  }
+
+  const reviewItemId = await proposeMerge(candidateId);
+  if (!reviewItemId) return { error: "merge proposal generation failed — is the LLM provider reachable?" };
+  return { reviewItemId };
 }
 
 /** 3-pane review payload: Article A | Article B | proposed merge (diff + rationale). */

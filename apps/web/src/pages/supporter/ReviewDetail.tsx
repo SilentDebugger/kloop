@@ -14,6 +14,7 @@ type DraftPayload = {
   proposed: { revisionId: string; title: string; summary: string; changeNote: string | null; blocks: BlockShape[] };
   current: { title: string; blocks: BlockShape[] } | null;
   sources: string[];
+  similarArticles?: { id: string; kb: string; title: string; summary: string; similarity: number | null }[];
 };
 type MergePayload = {
   item: { id: string; kind: "merge"; confidence: number; context: string | null };
@@ -115,6 +116,8 @@ function DraftReview({ payload }: { payload: DraftPayload }) {
     onSuccess: done,
   });
   const reject = useMutation({ mutationFn: () => api.rejectReview(item.id), onSuccess: done });
+  const merge = useMutation({ mutationFn: (articleId: string) => api.reviewMergeInto(item.id, articleId), onSuccess: done });
+  const similar = payload.similarArticles ?? [];
 
   const confidenceLabel = item.confidence >= 0.75 ? "high confidence" : item.confidence >= 0.45 ? "medium confidence" : "low confidence";
 
@@ -197,9 +200,45 @@ function DraftReview({ payload }: { payload: DraftPayload }) {
         </>
       )}
 
-      {(approve.isError || reject.isError) && (
+      {/* near-duplicate warning: merge into an existing doc instead of publishing both */}
+      {similar.length > 0 && (
+        <div className="mt-4 rounded-card bg-surface p-4">
+          <SectionLabel>Similar existing articles</SectionLabel>
+          <p className="mt-0.5 text-[13px] text-ink-secondary">Covers the same ground? Merge instead of publishing a duplicate.</p>
+          <div className="mt-3 flex flex-col gap-2.5">
+            {similar.map((a) => (
+              <div key={a.id} className="flex items-center gap-3 rounded-inner bg-card p-3 shadow-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[14px] font-semibold text-ink">
+                    {a.kb} · {a.title}
+                  </div>
+                  {a.summary && <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{a.summary}</div>}
+                  {a.similarity != null && (
+                    <div className="mt-0.5 text-[12px] font-semibold text-primary">{Math.round(a.similarity * 100)}% similar</div>
+                  )}
+                </div>
+                <Button
+                  variant="secondary"
+                  className="shrink-0"
+                  loading={merge.isPending && merge.variables === a.id}
+                  disabled={merge.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Merge this draft into ${a.kb} · "${a.title}"? kloop creates a merge proposal for review; ${a.kb} keeps its number.`)) {
+                      merge.mutate(a.id);
+                    }
+                  }}
+                >
+                  Merge into {a.kb}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(approve.isError || reject.isError || merge.isError) && (
         <div className="mt-4">
-          <ErrorNote>{((approve.error ?? reject.error) as Error).message}</ErrorNote>
+          <ErrorNote>{((approve.error ?? reject.error ?? merge.error) as Error).message}</ErrorNote>
         </div>
       )}
 

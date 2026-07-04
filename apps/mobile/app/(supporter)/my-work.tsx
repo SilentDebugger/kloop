@@ -20,7 +20,7 @@ export default function MyWorkScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}>
         <View style={{ paddingTop: 8, paddingBottom: 14 }}>
           <PageTitle>My work</PageTitle>
         </View>

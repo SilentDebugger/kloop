@@ -226,7 +226,7 @@ function WorkbenchView({ detail }: { detail: RequestDetail }) {
 
       <div className="mt-4 flex flex-col gap-3 pb-52">
         {messages.map((m) => (
-          <MessageBubble key={m.id} m={m} ownId={user?.id ?? ""} supporterView />
+          <MessageBubble key={m.id} m={m} ownId={user?.id ?? ""} />
         ))}
 
         {request.status !== "solved" && (
@@ -264,7 +264,7 @@ function WorkbenchView({ detail }: { detail: RequestDetail }) {
 /* Shared pieces                                                         */
 /* ===================================================================== */
 
-function MessageBubble({ m, ownId, supporterView }: { m: MessageView; ownId: string; supporterView?: boolean }) {
+function MessageBubble({ m, ownId }: { m: MessageView; ownId: string }) {
   if (m.kind === "system") {
     return <div className="py-1 text-center text-[12px] text-ink-faint">{m.body}</div>;
   }
@@ -281,9 +281,8 @@ function MessageBubble({ m, ownId, supporterView }: { m: MessageView; ownId: str
   }
 
   const own = m.author?.id === ownId;
-  const green = own;
   const meta = [
-    m.author?.name ?? (m.kind === "auto_answer" ? "kloop" : "System"),
+    own ? null : (m.author?.name ?? (m.kind === "auto_answer" ? "kloop" : "System")),
     clockTime(m.createdAt),
     m.fromAiDraft ? "from AI draft, edited" : null,
     m.kind === "auto_answer" ? "auto-answer" : null,
@@ -292,21 +291,25 @@ function MessageBubble({ m, ownId, supporterView }: { m: MessageView; ownId: str
     .join(" · ");
 
   return (
-    <div className={`max-w-[92%] rounded-card p-4 ${green ? "self-start bg-primary text-white" : "self-start bg-card shadow-card"} ${supporterView && own ? "self-end" : ""}`}>
-      <p className={`whitespace-pre-wrap text-[15px] leading-relaxed ${green ? "text-white" : "text-ink"}`}>{m.body}</p>
+    <div
+      className={`max-w-[85%] rounded-bubble p-3.5 ${
+        own ? "self-end rounded-br-[6px] bg-primary text-white" : "self-start rounded-bl-[6px] bg-card shadow-card"
+      }`}
+    >
+      <p className={`whitespace-pre-wrap text-[15px] leading-relaxed ${own ? "text-white" : "text-ink"}`}>{m.body}</p>
       {m.attachments && m.attachments.length > 0 && (
         <div className="mt-2.5 flex flex-wrap gap-2">
           {m.attachments.map((a) => (
-            <AttachmentPreview key={a.id} a={a} light={green} />
+            <AttachmentPreview key={a.id} a={a} light={own} />
           ))}
         </div>
       )}
       {m.articleId && (
-        <Link to={`/kb/${m.articleId}`} className={`mt-2 inline-block text-[13px] font-semibold underline underline-offset-2 ${green ? "text-white" : "text-primary"}`}>
+        <Link to={`/kb/${m.articleId}`} className={`mt-2 inline-block text-[13px] font-semibold underline underline-offset-2 ${own ? "text-white" : "text-primary"}`}>
           View the article ›
         </Link>
       )}
-      <div className={`mt-1.5 text-[12px] ${green ? "text-white/70" : "text-ink-secondary"}`}>{meta}</div>
+      <div className={`mt-1 text-[11px] ${own ? "text-right text-white/70" : "text-ink-secondary"}`}>{meta}</div>
     </div>
   );
 }

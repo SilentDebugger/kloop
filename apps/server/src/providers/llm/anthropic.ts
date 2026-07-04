@@ -1,11 +1,16 @@
 import { config } from "../../config.js";
-import type { CompleteOptions, LlmProvider } from "./types.js";
+import { recordAiUsage } from "../../lib/aiUsage.js";
+import type { AiCallMeta, CompleteOptions, LlmProvider } from "./types.js";
 
 export class AnthropicLlmProvider implements LlmProvider {
   name = "anthropic";
   model = config.ANTHROPIC_MODEL;
 
-  private async messages(content: unknown, opts: { system?: string; maxTokens?: number; temperature?: number }): Promise<string> {
+  private async messages(
+    content: unknown,
+    opts: { system?: string; maxTokens?: number; temperature?: number },
+    usage: { operation: "complete" | "ocr"; purpose?: string; orgId?: string | null },
+  ): Promise<string> {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -23,7 +28,23 @@ export class AnthropicLlmProvider implements LlmProvider {
       signal: AbortSignal.timeout(120_000),
     });
     if (!res.ok) throw new Error(`anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const data = (await res.json()) as { content: { type: string; text?: string }[] };
+    const data = (await res.json()) as {
+      content: { type: string; text?: string }[];
+      usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number };
+    };
+    recordAiUsage({
+      orgId: usage.orgId,
+      provider: this.name,
+      model: this.model,
+      operation: usage.operation,
+      purpose: usage.purpose,
+      // Anthropic reports cache reads separately from input_tokens; the ledger
+      // stores input as the full prompt (cached included), so add them back.
+      inputTokens: (data.usage?.input_tokens ?? 0) + (data.usage?.cache_read_input_tokens ?? 0),
+      cachedTokens: data.usage?.cache_read_input_tokens ?? 0,
+      outputTokens: data.usage?.output_tokens ?? 0,
+      exact: data.usage != null,
+    });
     return data.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
   }
 
@@ -31,10 +52,10 @@ export class AnthropicLlmProvider implements LlmProvider {
     const prompt = opts.json
       ? `${opts.prompt}\n\nRespond with valid JSON only — no prose, no code fences.`
       : opts.prompt;
-    return this.messages(prompt, opts);
+    return this.messages(prompt, opts, { operation: "complete", purpose: opts.task, orgId: opts.orgId });
   }
 
-  async ocr(image: Buffer, mimeType: string): Promise<string | null> {
+  async ocr(image: Buffer, mimeType: string, meta?: AiCallMeta): Promise<string | null> {
     return this.messages(
       [
         {
@@ -47,6 +68,7 @@ export class AnthropicLlmProvider implements LlmProvider {
         },
       ],
       { maxTokens: 1024, temperature: 0 },
+      { operation: "ocr", purpose: meta?.purpose, orgId: meta?.orgId },
     );
   }
 

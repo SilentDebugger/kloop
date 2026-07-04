@@ -59,7 +59,7 @@ export async function runDoctor(): Promise<boolean> {
     await check(`embeddings (${config.EMBEDDING_PROVIDER})`, async () => {
       const { getEmbeddingProvider } = await import("./providers/embeddings/index.js");
       const provider = getEmbeddingProvider();
-      const [vec] = await provider.embed(["kloop doctor healthcheck"]);
+      const [vec] = await provider.embed(["kloop doctor healthcheck"], { purpose: "healthcheck" });
       return `${provider.model} -> ${vec.length} dims`;
     }),
   );
