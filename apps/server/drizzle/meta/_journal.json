@@ -15,6 +15,20 @@
       "when": 1783088493523,
       "tag": "0001_old_stick",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783194819286,
+      "tag": "0002_slim_exiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783237793894,
+      "tag": "0003_chat_search",
+      "breakpoints": true
     }
   ]
 }

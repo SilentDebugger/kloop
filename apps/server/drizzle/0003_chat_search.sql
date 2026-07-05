@@ -1,0 +1,2 @@
+ALTER TABLE "messages" ADD COLUMN "search_text" "tsvector" GENERATED ALWAYS AS (to_tsvector('simple', coalesce(body, ''))) STORED;--> statement-breakpoint
+CREATE INDEX "messages_search_gin" ON "messages" USING gin ("search_text");

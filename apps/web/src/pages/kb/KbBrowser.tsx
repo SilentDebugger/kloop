@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -8,10 +8,12 @@ import { isSupporter as roleIsSupporter, useAuth } from "../../lib/auth";
 import { timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
 import { Button, Card, Chip, EmptyState, Input, Segmented, Spinner } from "../../ui";
+import { MediaQueryBar, useComposerAttachments } from "../../ui/attachments";
 import { IconChevron, IconPlus } from "../../ui/icons";
 
 /**
- * KB browser (requester) / KB manager (supporter).
+ * KB browser (requester) / KB manager (supporter). Typing (or attaching a
+ * photo / voice memo) switches to hybrid semantic search over the same docs.
  * Supporters get status filters, stale flags, confidence, and "New article".
  */
 export function KbBrowserPage() {
@@ -23,6 +25,15 @@ export function KbBrowserPage() {
   const [tag, setTag] = useState<string | null>(null);
   const [status, setStatus] = useState<"published" | "draft" | "archived" | "all">("published");
   const [search, setSearch] = useState("");
+  const [q, setQ] = useState("");
+  const att = useComposerAttachments();
+
+  useEffect(() => {
+    const id = setTimeout(() => setQ(search.trim()), 350);
+    return () => clearTimeout(id);
+  }, [search]);
+
+  const searching = q.length >= 2 || att.ids.length > 0;
 
   const params: Record<string, string> = {};
   if (tag) params.tag = tag;
@@ -32,11 +43,16 @@ export function KbBrowserPage() {
     queryKey: ["articles", params],
     queryFn: () => api.articles(params),
   });
+  const { data: found, isFetching: searchLoading } = useQuery({
+    queryKey: ["search", q, att.ids.join(",")],
+    queryFn: () => api.search(q, att.ids),
+    enabled: searching,
+    staleTime: 30_000,
+    refetchInterval: (query) => ((query.state.data?.pendingAttachments ?? 0) > 0 ? 3000 : false),
+  });
 
-  const needle = search.trim().toLowerCase();
-  const articles = (data?.articles ?? []).filter(
-    (a) => !needle || a.title.toLowerCase().includes(needle) || a.summary.toLowerCase().includes(needle) || a.kb.toLowerCase().includes(needle),
-  );
+  const articles = data?.articles ?? [];
+  const loading = searching ? searchLoading || att.uploading || (found?.pendingAttachments ?? 0) > 0 : isLoading;
 
   return (
     <div className="mx-auto w-full max-w-xl px-4 pt-6 md:pt-10">
@@ -51,9 +67,12 @@ export function KbBrowserPage() {
         }
       />
 
-      <Input placeholder="Search articles…" value={search} onChange={(e) => setSearch(e.target.value)} className="mb-3 shadow-card !border-transparent" />
+      <Input placeholder="Search articles — text, photo, or voice…" value={search} onChange={(e) => setSearch(e.target.value)} className="shadow-card !border-transparent" />
+      <div className="mb-3">
+        <MediaQueryBar att={att} />
+      </div>
 
-      {supporter && (
+      {supporter && !searching && (
         <div className="mb-3">
           <Segmented
             value={status}
@@ -68,7 +87,7 @@ export function KbBrowserPage() {
         </div>
       )}
 
-      {(data?.tags?.length ?? 0) > 0 && (
+      {!searching && (data?.tags?.length ?? 0) > 0 && (
         <div className="mb-4 flex gap-1.5 overflow-x-auto pb-1">
           {(data!.tags as { tag: string; n: number }[]).slice(0, 12).map((tg) => (
             <Chip key={tg.tag} active={tag === tg.tag} onClick={() => setTag(tag === tg.tag ? null : tg.tag)}>
@@ -78,10 +97,29 @@ export function KbBrowserPage() {
         </div>
       )}
 
-      {isLoading ? (
+      {loading ? (
         <div className="flex justify-center pt-16">
           <Spinner size={26} />
         </div>
+      ) : searching ? (
+        (found?.articles.length ?? 0) === 0 ? (
+          <EmptyState title="No matches" hint="Try different words — search also matches by meaning." />
+        ) : (
+          <div className="flex flex-col gap-2.5 pb-8">
+            {found!.articles.map((a) => (
+              <Card key={a.id} as="button" onClick={() => navigate(`/kb/${a.id}`)} className="flex items-center gap-3 p-4">
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold leading-snug text-ink">{a.title}</span>
+                  <span className="mt-0.5 block truncate text-[13px] text-ink-secondary">
+                    {a.kb}
+                    {a.summary ? ` · ${a.summary}` : ""}
+                  </span>
+                </span>
+                <IconChevron size={16} className="shrink-0 text-ink-faint" />
+              </Card>
+            ))}
+          </div>
+        )
       ) : articles.length === 0 ? (
         <EmptyState title="No articles yet" hint="Solved requests become articles here — automatically drafted, human approved." />
       ) : (

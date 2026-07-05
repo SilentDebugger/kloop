@@ -20,6 +20,8 @@ export type RequestSummary = {
   ref: string;
   title: string;
   body: string;
+  /** set when a supporter logged this for someone without an account */
+  guestName: string | null;
   status: RequestStatus;
   channel: "web" | "mobile" | "email" | "api";
   tags: string[];
@@ -81,6 +83,16 @@ export type DeflectionSuggestion = {
   score: number;
 };
 
+/** Global hybrid search response — sectioned so clients can render clean groups. */
+export type SearchResults = {
+  articles: { id: string; kb: string; title: string; summary: string; helpfulCount: number; notHelpfulCount: number }[];
+  requests: { id: string; ref: string; title: string; status: string; solvedAt: string | null; createdAt: string }[];
+  messages: { id: string; requestId: string; ref: string; requestTitle: string; internal: boolean; snippet: string; createdAt: string }[];
+  resolutions: { id: string; requestId: string; summary: string; createdAt: string }[];
+  /** query attachments whose OCR/transcription hasn't landed yet — re-ask while > 0 */
+  pendingAttachments: number;
+};
+
 export type ArticleListItem = {
   id: string;
   kb: string;
@@ -125,6 +137,8 @@ export type ArticleView = {
     revisionId: string;
   };
   blocks: ArticleBlockView[];
+  /** photos / voice notes attached to the doc — vectorized and searchable */
+  attachments?: AttachmentRef[];
   provenance?: { blockId: string; sourceKind: string; sourceId: string; ref: string | null }[];
   redirectTo?: string;
 };

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { SymbolView } from "expo-symbols";
 import { useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { colors, type RequestSummary } from "@kloop/shared";
@@ -40,9 +41,18 @@ export default function QueueScreen() {
             <Text style={{ fontSize: 13, fontWeight: "600", color: colors.primary }}>{ws?.name}</Text>
             <PageTitle>Queue</PageTitle>
           </View>
-          <Pressable onPress={() => router.push("/settings")}>
-            <Avatar name={ws?.user?.name} size={38} tint />
-          </Pressable>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            {/* log a request for a user or guest */}
+            <Pressable
+              onPress={() => router.push("/new-request")}
+              style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: colors.mint, alignItems: "center", justifyContent: "center" }}
+            >
+              <SymbolView name={{ ios: "plus", android: "add" }} size={17} weight="semibold" tintColor={colors.primary} />
+            </Pressable>
+            <Pressable onPress={() => router.push("/settings")}>
+              <Avatar name={ws?.user?.name} size={38} tint />
+            </Pressable>
+          </View>
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 12 }}>
@@ -93,7 +103,7 @@ function QueueCard({ r }: { r: RequestSummary }) {
   });
 
   const sub = [
-    r.author?.name,
+    r.author?.name ?? (r.guestName ? `${r.guestName} (guest)` : null),
     r.autoAnswered && r.escalated ? "auto-answer didn't help" : null,
     r.channel === "email" ? "via email-in" : null,
     r.body ? `"${r.body.slice(0, 50)}${r.body.length > 50 ? "…" : ""}"` : null,

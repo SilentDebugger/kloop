@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { Button, Chip, ErrorNote, Input, SectionLabel, Spinner } from "../../ui";
+import { MediaQueryBar, useComposerAttachments } from "../../ui/attachments";
 import { IconPlus, IconX } from "../../ui/icons";
 import { BackBar } from "../shared/BackBar";
 
@@ -39,6 +40,9 @@ export function ArticleEditorPage() {
   ]);
   const [changeNote, setChangeNote] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const att = useComposerAttachments(); // new uploads — vectorized and searchable once saved
+  const [removedAtt, setRemovedAtt] = useState<string[]>([]);
+  const existingAtt = (data?.attachments ?? []).filter((a) => !removedAtt.includes(a.id));
 
   useEffect(() => {
     if (data && !loaded) {
@@ -61,9 +65,12 @@ export function ArticleEditorPage() {
         blocks: blocks
           .filter((b) => b.contentMd.trim())
           .map((b) => ({ kind: b.kind, contentMd: b.contentMd.trim(), conditionText: b.conditionText.trim() || null })),
+        attachmentIds: att.ids,
         publish: true,
       };
-      return isNew ? api.createArticle(payload) : api.updateArticle(id!, { ...payload, changeNote: changeNote.trim() || undefined });
+      return isNew
+        ? api.createArticle(payload)
+        : api.updateArticle(id!, { ...payload, removeAttachmentIds: removedAtt, changeNote: changeNote.trim() || undefined });
     },
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ["articles"] });
@@ -80,7 +87,7 @@ export function ArticleEditorPage() {
     );
   }
 
-  const canSave = title.trim().length >= 3 && blocks.some((b) => b.contentMd.trim());
+  const canSave = title.trim().length >= 3 && blocks.some((b) => b.contentMd.trim()) && !att.uploading;
 
   return (
     <div className="mx-auto w-full max-w-xl px-4 pb-32 pt-4">
@@ -156,6 +163,34 @@ export function ArticleEditorPage() {
         >
           <IconPlus size={16} /> Add block
         </button>
+
+        {/* media: screenshots + voice notes, vectorized so search finds them */}
+        <SectionLabel className="mt-2">Media</SectionLabel>
+        {existingAtt.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {existingAtt.map((a) => (
+              <span key={a.id} className="relative">
+                {a.kind === "image" ? (
+                  <img src={api.attachmentRawUrl(a.id)} alt={a.filename} className="h-16 w-16 rounded-xl object-cover" />
+                ) : a.kind === "audio" ? (
+                  <audio controls src={api.attachmentRawUrl(a.id)} className="h-9 max-w-56" />
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-chip px-3 py-1 text-[12px] font-medium">{a.filename}</span>
+                )}
+                <button
+                  onClick={() => setRemovedAtt((x) => [...x, a.id])}
+                  aria-label="Remove"
+                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-ink text-white cursor-pointer"
+                >
+                  <IconX size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="-mt-2">
+          <MediaQueryBar att={att} />
+        </div>
 
         {!isNew && (
           <>

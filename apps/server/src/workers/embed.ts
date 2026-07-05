@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, tables } from "../db/index.js";
 import { getEmbeddingProvider } from "../providers/embeddings/index.js";
 import { getLlmProvider } from "../providers/llm/index.js";
@@ -65,10 +65,23 @@ async function embedText(
   return { vec: vecLiteral(vec), model: provider.model };
 }
 
+/** OCR/transcripts of media owned by a row — folded into the owner's embedding text. */
+async function attachmentTexts(ownerKind: string, ownerId: string): Promise<string> {
+  const rows = await db
+    .select({ extractedText: tables.attachments.extractedText })
+    .from(tables.attachments)
+    .where(and(eq(tables.attachments.ownerKind, ownerKind), eq(tables.attachments.ownerId, ownerId)));
+  return rows
+    .map((r) => r.extractedText?.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
 async function embedRequest(id: string): Promise<void> {
   const row = await db.query.requests.findFirst({ where: eq(tables.requests.id, id) });
   if (!row) return;
-  const out = await embedText(`${row.title}\n${row.body}`, { orgId: row.orgId, purpose: "embed_request" });
+  const media = await attachmentTexts("request", id);
+  const out = await embedText(`${row.title}\n${row.body}\n${media}`, { orgId: row.orgId, purpose: "embed_request" });
   await db
     .update(tables.requests)
     .set(out ? { embedding: JSON.parse(out.vec), embeddingModel: out.model, embeddingStatus: "ok" } : { embeddingStatus: "skipped" })
@@ -78,7 +91,8 @@ async function embedRequest(id: string): Promise<void> {
 async function embedResolution(id: string): Promise<void> {
   const row = await db.query.resolutions.findFirst({ where: eq(tables.resolutions.id, id) });
   if (!row) return;
-  const out = await embedText(`${row.structuredSummary ?? ""}\n${row.rawCaptureText}`, {
+  const media = await attachmentTexts("resolution", id);
+  const out = await embedText(`${row.structuredSummary ?? ""}\n${row.rawCaptureText}\n${media}`, {
     orgId: row.orgId,
     purpose: "embed_resolution",
   });
@@ -95,7 +109,8 @@ async function embedArticle(id: string): Promise<void> {
     where: eq(tables.articleRevisions.id, row.currentRevisionId),
   });
   if (!rev) return;
-  const out = await embedText(`${rev.title}\n${rev.summary}`, { orgId: row.orgId, purpose: "embed_article" });
+  const media = await attachmentTexts("article", id);
+  const out = await embedText(`${rev.title}\n${rev.summary}\n${media}`, { orgId: row.orgId, purpose: "embed_article" });
   await db
     .update(tables.articles)
     .set(out ? { embedding: JSON.parse(out.vec), embeddingModel: out.model, embeddingStatus: "ok" } : { embeddingStatus: "skipped" })
@@ -118,7 +133,8 @@ async function embedArticleBlock(id: string): Promise<void> {
 async function embedMessage(id: string): Promise<void> {
   const row = await db.query.messages.findFirst({ where: eq(tables.messages.id, id) });
   if (!row) return;
-  const out = await embedText(row.body, { orgId: row.orgId, purpose: "embed_message" });
+  const media = await attachmentTexts("message", id);
+  const out = await embedText(`${row.body}\n${media}`, { orgId: row.orgId, purpose: "embed_message" });
   await db
     .update(tables.messages)
     .set(out ? { embedding: JSON.parse(out.vec), embeddingStatus: "ok" } : { embeddingStatus: "skipped" })
@@ -176,20 +192,9 @@ async function embedAttachment(id: string): Promise<void> {
     .where(eq(tables.attachments.id, id));
 
   // Extracted text feeds back into the owner's embedding (photo of an error
-  // screen attached to a request makes the request itself more matchable).
-  if (extractedText && row.ownerKind === "request") {
-    const req = await db.query.requests.findFirst({ where: eq(tables.requests.id, row.ownerId) });
-    if (req) {
-      const out = await embedText(`${req.title}\n${req.body}\n${extractedText}`, {
-        orgId: req.orgId,
-        purpose: "embed_request",
-      });
-      if (out) {
-        await db
-          .update(tables.requests)
-          .set({ embedding: JSON.parse(out.vec), embeddingModel: out.model, embeddingStatus: "ok" })
-          .where(eq(tables.requests.id, req.id));
-      }
-    }
-  }
+  // screen attached to a request, message, or article makes it more matchable).
+  if (extractedText && row.ownerKind === "request") await embedRequest(row.ownerId);
+  if (extractedText && row.ownerKind === "article") await embedArticle(row.ownerId);
+  if (extractedText && row.ownerKind === "message") await embedMessage(row.ownerId);
+  if (extractedText && row.ownerKind === "resolution") await embedResolution(row.ownerId);
 }

@@ -74,7 +74,7 @@ export function Button({
       ]}
     >
       {loading ? <ActivityIndicator size="small" color={fg} /> : icon}
-      <Text style={{ color: fg, fontWeight: "600", fontSize: size === "sm" ? 13 : 15 }}>{title}</Text>
+      <Text numberOfLines={1} style={{ color: fg, fontWeight: "600", fontSize: size === "sm" ? 13 : 15 }}>{title}</Text>
     </Pressable>
   );
 }

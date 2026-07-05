@@ -8,6 +8,7 @@ import { api } from "../../src/api";
 import { timeAgo } from "../../src/format";
 import { useDrafts } from "../../src/store/drafts";
 import { Button, Card, Chip, SectionLabel, Spinner } from "../../src/ui";
+import { RemoteAttachments } from "../../src/ui/attachments";
 import { MarkdownLite } from "../../src/ui/MarkdownLite";
 
 const blockLabels: Record<string, string> = {
@@ -105,6 +106,8 @@ export default function ArticleScreen() {
             ),
           )}
         </View>
+
+        <RemoteAttachments items={data.attachments} style={{ marginTop: 12 }} />
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 18 }}>
           <Text style={{ fontSize: 14, color: colors.textSecondary }}>Was this helpful?</Text>

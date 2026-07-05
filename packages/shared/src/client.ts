@@ -16,6 +16,8 @@ import type {
   RequestSummary,
   ReviewCounts,
   ReviewListItem,
+  Role,
+  SearchResults,
   SessionUser,
 } from "./types.js";
 
@@ -128,6 +130,9 @@ export class KloopClient {
   updateUser(id: string, patch: { role?: string; deactivated?: boolean }) {
     return this.patch<{ user: Record<string, unknown> }>(`/api/org/users/${id}`, patch);
   }
+  createUser(input: { name: string; email: string; password: string; role: string }) {
+    return this.post<{ user: { id: string } }>("/api/org/users", input);
+  }
   invitations() {
     return this.get<{ invitations: { id: string; email: string; role: string; createdAt: string }[] }>("/api/org/invitations");
   }
@@ -139,8 +144,20 @@ export class KloopClient {
   }
 
   // ---- requests ----
-  createRequest(input: { title: string; body?: string; channel?: string; tags?: string[]; attachmentIds?: string[] }) {
+  createRequest(input: {
+    title: string;
+    body?: string;
+    channel?: string;
+    tags?: string[];
+    attachmentIds?: string[];
+    /** supporters only: log the request for an existing user or a guest */
+    onBehalf?: { userId?: string; guestName?: string };
+  }) {
     return this.post<{ request: RequestSummary }>("/api/requests", input);
+  }
+  /** Supporter people picker (active org users). */
+  directory() {
+    return this.get<{ users: { id: string; name: string; email: string; role: Role }[] }>("/api/org/directory");
   }
   selfSolve(input: { title: string; body?: string; articleId: string }) {
     return this.post<{ request: RequestSummary }>("/api/requests/self-solve", input);
@@ -187,12 +204,10 @@ export class KloopClient {
   deflect(text: string, attachmentIds: string[] = []) {
     return this.post<{ suggestions: DeflectionSuggestion[]; pendingAttachments: number }>("/api/deflect", { text, attachmentIds });
   }
-  search(q: string) {
-    return this.get<{
-      articles: { id: string; kb: string; title: string; summary: string; helpfulCount: number; notHelpfulCount: number }[];
-      requests: { id: string; ref: string; title: string; status: string; solvedAt: string | null; createdAt: string }[];
-      resolutions: { id: string; requestId: string; summary: string; createdAt: string }[];
-    }>(`/api/search?q=${encodeURIComponent(q)}`);
+  /** Global hybrid search. Photos/voice notes join the query via `attachmentIds`. */
+  search(q: string, attachmentIds: string[] = []) {
+    const att = attachmentIds.length > 0 ? `&att=${attachmentIds.join(",")}` : "";
+    return this.get<SearchResults>(`/api/search?q=${encodeURIComponent(q)}${att}`);
   }
 
   // ---- articles ----
@@ -206,10 +221,10 @@ export class KloopClient {
   articleFeedback(id: string, helpful: boolean) {
     return this.post<{ ok: true }>(`/api/articles/${id}/feedback`, { helpful });
   }
-  createArticle(input: { title: string; summary?: string; tags?: string[]; blocks: { kind: string; contentMd: string; conditionText?: string | null }[]; publish?: boolean }) {
+  createArticle(input: { title: string; summary?: string; tags?: string[]; blocks: { kind: string; contentMd: string; conditionText?: string | null }[]; attachmentIds?: string[]; publish?: boolean }) {
     return this.post<{ article: { id: string; kb: string } }>("/api/articles", input);
   }
-  updateArticle(id: string, input: { title: string; summary?: string; tags?: string[]; blocks: { kind: string; contentMd: string; conditionText?: string | null }[]; changeNote?: string; publish?: boolean }) {
+  updateArticle(id: string, input: { title: string; summary?: string; tags?: string[]; blocks: { kind: string; contentMd: string; conditionText?: string | null }[]; attachmentIds?: string[]; removeAttachmentIds?: string[]; changeNote?: string; publish?: boolean }) {
     return this.put<{ ok: true; revisionId: string }>(`/api/articles/${id}`, input);
   }
   archiveArticle(id: string, redirectToArticleId: string | null = null) {

@@ -113,6 +113,16 @@ function AuthGate() {
       </Stack.Protected>
       <Stack.Protected guard={authed && !isRequester}>
         <Stack.Screen name="(supporter)" />
+        {/* log a request for a user or guest — same native sheet as resolve */}
+        <Stack.Screen
+          name="new-request"
+          options={{
+            presentation: "formSheet",
+            sheetAllowedDetents: [0.85],
+            sheetGrabberVisible: true,
+            sheetCornerRadius: 24,
+          }}
+        />
       </Stack.Protected>
       <Stack.Protected guard={authed}>
         <Stack.Screen name="request/[id]" />

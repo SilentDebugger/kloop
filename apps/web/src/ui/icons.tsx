@@ -173,6 +173,13 @@ export const IconEdit = (p: IconProps) => (
     <path d="m14.5 6.5 3 3" />
   </svg>
 );
+export const IconDots = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="5.5" cy="12" r="0.9" fill="currentColor" />
+    <circle cx="12" cy="12" r="0.9" fill="currentColor" />
+    <circle cx="18.5" cy="12" r="0.9" fill="currentColor" />
+  </svg>
+);
 export const IconMerge = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="6" cy="6" r="2.2" />

@@ -1,6 +1,9 @@
+import { useState } from "react";
 import { fetch } from "expo/fetch";
 import { File } from "expo-file-system";
 import { activeWorkspace } from "./store/connection";
+import { useVoiceNote } from "./recorder";
+import type { LocalAttachment } from "./ui/attachments";
 
 export type Picked = { uri: string; name: string; type: string };
 
@@ -24,6 +27,55 @@ export async function uploadFile(file: Picked): Promise<{ id: string; filename: 
   const data = (await res.json()) as { attachment?: { id: string; filename: string; kind: string }; error?: string };
   if (!res.ok || !data.attachment) throw new Error(data.error ?? "upload failed");
   return data.attachment;
+}
+
+/**
+ * Camera / photo-library / voice-note capture + upload, with the pending list
+ * kept for previews. One hook shared by every composer that takes attachments
+ * (home one-box, chat reply, new-request sheet, search, article editor).
+ */
+export function useComposerAttachments() {
+  const voice = useVoiceNote();
+  const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+
+  const attach = async (kind: "camera" | "photo" | "voice") => {
+    try {
+      if (kind === "voice") {
+        if (voice.recording) {
+          const note = await voice.stop();
+          if (note) {
+            setUploading(true);
+            const a = await uploadFile(note);
+            setAttachments((x) => [...x, { id: a.id, filename: a.filename, kind: "audio", localUri: note.uri, durationMs: note.durationMs }]);
+          }
+        } else {
+          await voice.start();
+        }
+        return;
+      }
+      const picked = await pickImage(kind === "camera");
+      if (picked) {
+        setUploading(true);
+        const a = await uploadFile(picked);
+        setAttachments((x) => [...x, { id: a.id, filename: a.filename, kind: a.kind, localUri: picked.uri }]);
+      }
+    } catch {
+      /* upload failed — keep composing */
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return {
+    attachments,
+    ids: attachments.map((a) => a.id),
+    uploading,
+    recording: voice.recording,
+    attach,
+    remove: (id: string) => setAttachments((x) => x.filter((y) => y.id !== id)),
+    clear: () => setAttachments([]),
+  };
 }
 
 export async function pickImage(fromCamera: boolean): Promise<Picked | null> {

@@ -78,9 +78,12 @@ function ReviewCard({ item }: { item: ReviewListItem }) {
 
   return (
     <Card onPress={open} style={{ padding: 14, gap: 8 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <KindBadge kind={item.kind} />
-        <Text style={{ fontSize: 13, color: colors.textSecondary }}>{item.kind === "stale" ? (item.context ?? "flagged") : confidenceLabel}</Text>
+        {/* long stale contexts truncate instead of overflowing the card */}
+        <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 13, color: colors.textSecondary }}>
+          {item.kind === "stale" ? (item.context ?? "flagged") : confidenceLabel}
+        </Text>
       </View>
       <Text style={{ fontWeight: "700", fontSize: 15, color: colors.text, lineHeight: 20 }}>{title}</Text>
       <Text style={{ fontSize: 13, color: colors.textSecondary }}>

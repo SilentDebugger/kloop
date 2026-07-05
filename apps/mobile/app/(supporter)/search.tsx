@@ -6,27 +6,35 @@ import { useQuery } from "@tanstack/react-query";
 import { colors } from "@kloop/shared";
 import { api } from "../../src/api";
 import { timeAgo } from "../../src/format";
+import { useComposerAttachments } from "../../src/uploads";
 import { Card, EmptyState, Input, PageTitle, SectionLabel, Spinner, StatusBadge } from "../../src/ui";
+import { AttachChips, AttachmentTray } from "../../src/ui/attachments";
 
-/** Global hybrid search — articles, requests, resolutions. */
+/** Global hybrid search — type it, photograph it, or say it. */
 export default function SearchScreen() {
   const router = useRouter();
   const [text, setText] = useState("");
   const [q, setQ] = useState("");
+  const att = useComposerAttachments();
 
   useEffect(() => {
     const id = setTimeout(() => setQ(text.trim()), 350);
     return () => clearTimeout(id);
   }, [text]);
 
+  // media queries work text-free; OCR/transcription lands async, so re-ask
+  // while the server reports attachments still pending
   const { data, isFetching } = useQuery({
-    queryKey: ["search", q],
-    queryFn: () => api.search(q),
-    enabled: q.length >= 2,
+    queryKey: ["search", q, att.ids.join(",")],
+    queryFn: () => api.search(q, att.ids),
+    enabled: q.length >= 2 || att.ids.length > 0,
     staleTime: 30_000,
+    refetchInterval: (query) => ((query.state.data?.pendingAttachments ?? 0) > 0 ? 3000 : false),
   });
 
-  const hasResults = data && (data.articles.length > 0 || data.requests.length > 0 || data.resolutions.length > 0);
+  const hasQuery = q.length >= 2 || att.ids.length > 0;
+  const hasResults =
+    data && (data.articles.length > 0 || data.requests.length > 0 || data.messages.length > 0 || data.resolutions.length > 0);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
@@ -41,10 +49,23 @@ export default function SearchScreen() {
           onChangeText={setText}
           style={{ borderColor: "transparent" }}
         />
+        <View style={{ marginTop: 10, gap: 10 }}>
+          <AttachmentTray items={att.attachments} onRemove={att.remove} />
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <AttachChips recording={att.recording} attach={att.attach} />
+          </View>
+        </View>
 
-        {isFetching && <Spinner pad={20} />}
-        {!q && !isFetching && <EmptyState title="Search the whole loop" hint="Articles, requests, and resolutions — hybrid semantic + keyword search." />}
-        {q.length >= 2 && data && !hasResults && !isFetching && <EmptyState title="No matches" hint="Try different words — search also matches by meaning." />}
+        {(isFetching || att.uploading || (data?.pendingAttachments ?? 0) > 0) && <Spinner pad={20} />}
+        {!hasQuery && !isFetching && (
+          <EmptyState
+            title="Search the whole loop"
+            hint="Articles, requests, chats, and resolutions — search by meaning with text, a photo, or a voice memo."
+          />
+        )}
+        {hasQuery && data && !hasResults && !isFetching && (
+          <EmptyState title="No matches" hint="Try different words — search also matches by meaning." />
+        )}
 
         {hasResults && (
           <View style={{ gap: 18, marginTop: 14 }}>
@@ -74,6 +95,22 @@ export default function SearchScreen() {
                       </Text>
                     </View>
                     <StatusBadge status={r.status} />
+                  </Card>
+                ))}
+              </View>
+            )}
+            {data.messages.length > 0 && (
+              <View style={{ gap: 8 }}>
+                <SectionLabel>Chats</SectionLabel>
+                {data.messages.map((m) => (
+                  <Card key={m.id} onPress={() => router.push(`/request/${m.requestId}`)} style={{ padding: 14 }}>
+                    <Text numberOfLines={2} style={{ fontSize: 14, color: colors.text, lineHeight: 19 }}>
+                      "{m.snippet}"
+                    </Text>
+                    <Text numberOfLines={1} style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>
+                      {m.internal ? "Internal note · " : ""}
+                      {m.ref} · {m.requestTitle} · {timeAgo(m.createdAt)} ago
+                    </Text>
                   </Card>
                 ))}
               </View>

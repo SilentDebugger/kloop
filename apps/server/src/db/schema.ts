@@ -141,7 +141,10 @@ export const requests = pgTable(
     orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
     /** Human-friendly sequential ref per org, e.g. REQ-1284 (assigned by app code). */
     refNumber: integer("ref_number").notNull(),
-    authorId: uuid("author_id").notNull().references(() => users.id),
+    /** null = guest request: logged by a supporter for someone without an account */
+    authorId: uuid("author_id").references(() => users.id),
+    /** display name of that guest (walk-up, phone call) */
+    guestName: text("guest_name"),
     title: text("title").notNull(),
     body: text("body").notNull().default(""),
     status: text("status").notNull().default("open"), // open | handled | solved
@@ -198,9 +201,15 @@ export const messages = pgTable(
     fromAiDraft: boolean("from_ai_draft").notNull().default(false),
     embedding: vector("embedding", { dimensions: EMBEDDING_DIM }),
     embeddingStatus: embeddingStatus(),
+    searchText: tsvector("search_text").generatedAlwaysAs(
+      (): ReturnType<typeof sql> => sql`to_tsvector('simple', coalesce(body, ''))`,
+    ),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("messages_request_idx").on(t.requestId, t.createdAt)],
+  (t) => [
+    index("messages_request_idx").on(t.requestId, t.createdAt),
+    index("messages_search_gin").using("gin", t.searchText),
+  ],
 );
 
 export const resolutions = pgTable(

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   Keyboard,
   Platform,
   Pressable,
@@ -23,7 +22,7 @@ import { useActiveWorkspace } from "../../src/store/connection";
 import { pickImage, uploadFile } from "../../src/uploads";
 import { useVoiceNote } from "../../src/recorder";
 import { Button, Chip, SectionLabel, Spinner, StatusBadge } from "../../src/ui";
-import { AttachmentTray, AudioChip, ImageViewer, type LocalAttachment } from "../../src/ui/attachments";
+import { AttachmentTray, RemoteAttachments, type LocalAttachment } from "../../src/ui/attachments";
 
 /** Request thread — requester confirm loop / supporter workbench in one route. */
 export default function RequestScreen() {
@@ -134,6 +133,22 @@ function useStickyScroll() {
   };
 }
 
+/**
+ * What was sent when the request was created, rendered like a chat message —
+ * the intake photo / voice note would otherwise be invisible in the thread.
+ */
+function originalMessage({ request, attachments }: RequestDetail): MessageView | null {
+  if (!request.body.trim() && attachments.length === 0) return null;
+  return {
+    id: "original",
+    kind: "message",
+    body: request.body,
+    author: request.author ?? (request.guestName ? { id: "guest", name: request.guestName } : null),
+    createdAt: request.createdAt,
+    attachments,
+  };
+}
+
 function RequesterThread({ detail }: { detail: RequestDetail }) {
   const { request, messages } = detail;
   const ws = useActiveWorkspace();
@@ -178,9 +193,9 @@ function RequesterThread({ detail }: { detail: RequestDetail }) {
           keyboardDismissMode="interactive"
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: composerH + 12, gap: 10 }}
         >
-          {messages.map((m) => (
-            <Bubble key={m.id} m={m} ownId={ws?.user?.id ?? ""} />
-          ))}
+          {[originalMessage(detail), ...messages].map(
+            (m) => m && <Bubble key={m.id} m={m} ownId={ws?.user?.id ?? ""} />,
+          )}
 
           {request.confirmationState === "pending" && (
             <View style={{ backgroundColor: colors.mint, borderRadius: radii.lg, padding: 18, gap: 4 }}>
@@ -241,7 +256,11 @@ function Workbench({ detail }: { detail: RequestDetail }) {
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
       <BackHeader
         title={request.title}
-        subtitle={`${request.ref} · ${request.author?.name ?? ""} · ${request.authorPastRequests ?? 1} past requests`}
+        subtitle={
+          request.author
+            ? `${request.ref} · ${request.author.name} · ${request.authorPastRequests ?? 1} past requests`
+            : `${request.ref} · ${request.guestName ?? "Guest"} · guest`
+        }
         right={
           request.status === "open" && !request.claimedBy ? (
             <Button title="Claim" size="sm" variant="mint" loading={claim.isPending} onPress={() => claim.mutate()} />
@@ -284,9 +303,9 @@ function Workbench({ detail }: { detail: RequestDetail }) {
             </View>
           )}
 
-          {messages.map((m) => (
-            <Bubble key={m.id} m={m} ownId={ws?.user?.id ?? ""} />
-          ))}
+          {[originalMessage(detail), ...messages].map(
+            (m) => m && <Bubble key={m.id} m={m} ownId={ws?.user?.id ?? ""} />,
+          )}
 
           {/* once resolved, the capture replaces the "Mark resolved" button */}
           {resolutions[0] && (request.confirmationState === "pending" || request.status === "solved") && (
@@ -306,7 +325,7 @@ function Workbench({ detail }: { detail: RequestDetail }) {
           )}
           {request.confirmationState === "pending" && (
             <Text style={{ textAlign: "center", fontSize: 13, color: colors.textSecondary }}>
-              Waiting for {request.author?.name ?? "the requester"} to confirm the fix.
+              Waiting for {request.author?.name ?? request.guestName ?? "the requester"} to confirm the fix.
             </Text>
           )}
         </ScrollView>
@@ -323,47 +342,16 @@ function Workbench({ detail }: { detail: RequestDetail }) {
  * confirms (and after), where the "Mark resolved" button used to be.
  */
 function ResolutionCard({ r }: { r: ResolutionView }) {
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
   const text = r.rawCaptureText.trim() || r.structuredSummary;
 
   return (
     <View style={{ backgroundColor: colors.mint, borderRadius: radii.lg, padding: 14, gap: 8 }}>
       <SectionLabel color={colors.primary}>✓ How it was fixed</SectionLabel>
       {text ? <Text style={{ fontSize: 15, lineHeight: 21, color: colors.text }}>{text}</Text> : null}
-      {r.attachments.length > 0 && (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          {r.attachments.map((a) =>
-            a.kind === "image" ? (
-              <Pressable key={a.id} onPress={() => setViewerUri(api.attachmentRawUrl(a.id))}>
-                <Image source={{ uri: api.attachmentRawUrl(a.id) }} style={{ width: 140, height: 100, borderRadius: 10 }} />
-              </Pressable>
-            ) : a.kind === "audio" ? (
-              <AudioChip key={a.id} uri={api.attachmentRawUrl(a.id)} />
-            ) : (
-              <View
-                key={a.id}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 5,
-                  backgroundColor: colors.card,
-                  borderRadius: 999,
-                  paddingVertical: 5,
-                  paddingHorizontal: 12,
-                  maxWidth: 220,
-                }}
-              >
-                <SymbolView name={{ ios: "paperclip", android: "attach_file" }} size={12} tintColor={colors.text} />
-                <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12, color: colors.text }}>{a.filename}</Text>
-              </View>
-            ),
-          )}
-        </View>
-      )}
+      <RemoteAttachments items={r.attachments} />
       <Text style={{ fontSize: 12, color: colors.textSecondary }}>
         {r.supporterName ?? "Support"} · {clockTime(r.createdAt)}
       </Text>
-      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
   );
 }
@@ -372,7 +360,6 @@ function ResolutionCard({ r }: { r: ResolutionView }) {
 
 function Bubble({ m, ownId }: { m: MessageView; ownId: string }) {
   const router = useRouter();
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
   if (m.kind === "system") {
     return <Text style={{ textAlign: "center", fontSize: 12, color: colors.textFaint, paddingVertical: 2 }}>{m.body}</Text>;
   }
@@ -411,36 +398,7 @@ function Bubble({ m, ownId }: { m: MessageView; ownId: string }) {
       }}
     >
       {m.body ? <Text style={{ fontSize: 15, lineHeight: 21, color: own ? "#fff" : colors.text }}>{m.body}</Text> : null}
-      {m.attachments && m.attachments.length > 0 && (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: m.body ? 8 : 0 }}>
-          {m.attachments.map((a) =>
-            a.kind === "image" ? (
-              <Pressable key={a.id} onPress={() => setViewerUri(api.attachmentRawUrl(a.id))}>
-                <Image source={{ uri: api.attachmentRawUrl(a.id) }} style={{ width: 140, height: 100, borderRadius: 10 }} />
-              </Pressable>
-            ) : a.kind === "audio" ? (
-              <AudioChip key={a.id} uri={api.attachmentRawUrl(a.id)} onDark={own} />
-            ) : (
-              <View
-                key={a.id}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 5,
-                  backgroundColor: own ? "rgba(255,255,255,0.2)" : colors.chip,
-                  borderRadius: 999,
-                  paddingVertical: 5,
-                  paddingHorizontal: 12,
-                  maxWidth: 220,
-                }}
-              >
-                <SymbolView name={{ ios: "paperclip", android: "attach_file" }} size={12} tintColor={own ? "#fff" : colors.text} />
-                <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12, color: own ? "#fff" : colors.text }}>{a.filename}</Text>
-              </View>
-            ),
-          )}
-        </View>
-      )}
+      <RemoteAttachments items={m.attachments} onDark={own} style={{ marginTop: m.body ? 8 : 0 }} />
       {m.articleId ? (
         <Pressable onPress={() => router.push(`/article/${m.articleId}`)}>
           <Text style={{ fontSize: 13, fontWeight: "600", textDecorationLine: "underline", color: own ? "#fff" : colors.primary, marginTop: 6 }}>
@@ -449,7 +407,6 @@ function Bubble({ m, ownId }: { m: MessageView; ownId: string }) {
         </Pressable>
       ) : null}
       <Text style={{ fontSize: 11, color: own ? "rgba(255,255,255,0.7)" : colors.textSecondary, marginTop: 4, textAlign: own ? "right" : "left" }}>{meta}</Text>
-      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
   );
 }

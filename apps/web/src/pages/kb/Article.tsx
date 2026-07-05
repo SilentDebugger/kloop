@@ -7,6 +7,7 @@ import { isSupporter as roleIsSupporter, useAuth } from "../../lib/auth";
 import { timeAgo } from "../../lib/format";
 import { Button, Chip, SectionLabel, Sheet, Spinner } from "../../ui";
 import { BackBar } from "../shared/BackBar";
+import { AttachmentPreview } from "../thread/Thread";
 import { ArticleBlocks } from "./ArticleBlocks";
 
 export function ArticlePage() {
@@ -93,6 +94,14 @@ export function ArticlePage() {
       <div className="mt-4">
         <ArticleBlocks blocks={blocks} provenance={supporter ? provenance : undefined} />
       </div>
+
+      {(data.attachments?.length ?? 0) > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {data.attachments!.map((a) => (
+            <AttachmentPreview key={a.id} a={a} />
+          ))}
+        </div>
+      )}
 
       <div className="mt-5 flex items-center gap-2.5 text-[14px] text-ink-secondary">
         {t("answer.wasHelpful")}

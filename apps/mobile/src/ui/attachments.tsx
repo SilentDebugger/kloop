@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Image, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Image, Modal, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SymbolView } from "expo-symbols";
 import { AudioModule, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
-import { colors } from "@kloop/shared";
+import { colors, type AttachmentRef } from "@kloop/shared";
+import { api } from "../api";
+import { Chip } from "./index";
 
 /** An uploaded attachment still held in the composer (local file for previews). */
 export type LocalAttachment = {
@@ -61,6 +63,96 @@ export function AttachmentTray({ items, onRemove }: { items: LocalAttachment[]; 
 
       <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
+  );
+}
+
+/**
+ * Server-side attachments rendered inline: image thumbnails (tap →
+ * fullscreen), playable voice notes, filename chips for the rest. Used in chat
+ * bubbles, resolution cards, and article views.
+ */
+export function RemoteAttachments({ items, onDark, style }: { items?: AttachmentRef[]; onDark?: boolean; style?: ViewStyle }) {
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  if (!items || items.length === 0) return null;
+
+  return (
+    <View style={[{ flexDirection: "row", flexWrap: "wrap", gap: 8 }, style]}>
+      {items.map((a) =>
+        a.kind === "image" ? (
+          <Pressable key={a.id} onPress={() => setViewerUri(api.attachmentRawUrl(a.id))}>
+            <Image source={{ uri: api.attachmentRawUrl(a.id) }} style={{ width: 140, height: 100, borderRadius: 10 }} />
+          </Pressable>
+        ) : a.kind === "audio" ? (
+          <AudioChip key={a.id} uri={api.attachmentRawUrl(a.id)} onDark={onDark} />
+        ) : (
+          <View
+            key={a.id}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 5,
+              backgroundColor: onDark ? "rgba(255,255,255,0.2)" : colors.chip,
+              borderRadius: 999,
+              paddingVertical: 5,
+              paddingHorizontal: 12,
+              maxWidth: 220,
+            }}
+          >
+            <SymbolView name={{ ios: "paperclip", android: "attach_file" }} size={12} tintColor={onDark ? "#fff" : colors.text} />
+            <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 12, color: onDark ? "#fff" : colors.text }}>{a.filename}</Text>
+          </View>
+        ),
+      )}
+      <ImageViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+    </View>
+  );
+}
+
+/**
+ * The standard Camera / Photo / Voice chip row. Pairs with
+ * useComposerAttachments — pass its `recording` + `attach`.
+ */
+export function AttachChips({
+  recording,
+  attach,
+  camera = true,
+  chipStyle,
+}: {
+  recording: boolean;
+  attach: (kind: "camera" | "photo" | "voice") => Promise<void>;
+  camera?: boolean;
+  chipStyle?: ViewStyle;
+}) {
+  return (
+    <>
+      {camera && (
+        <Chip
+          label="Camera"
+          icon={<SymbolView name={{ ios: "camera", android: "photo_camera" }} size={13} tintColor={colors.text} />}
+          onPress={() => void attach("camera")}
+          style={chipStyle}
+        />
+      )}
+      <Chip
+        label="Photo"
+        icon={<SymbolView name={{ ios: "photo", android: "image" }} size={13} tintColor={colors.text} />}
+        onPress={() => void attach("photo")}
+        style={chipStyle}
+      />
+      <Chip
+        label={recording ? "Stop" : "Voice"}
+        active={recording}
+        icon={
+          <SymbolView
+            name={recording ? { ios: "stop.fill", android: "stop" } : { ios: "mic.fill", android: "mic" }}
+            size={13}
+            tintColor={recording ? "#fff" : colors.text}
+          />
+        }
+        onPress={() => void attach("voice")}
+        style={chipStyle}
+      />
+    </>
   );
 }
 

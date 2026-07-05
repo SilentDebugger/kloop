@@ -125,6 +125,60 @@ Demo accounts (from `pnpm seed`, org **Fjord Logistics IT**) — password is `kl
 | `maya@fjord.io` | supporter |
 | `jonas.weber@fjord.io` | requester |
 
+### Resetting the database & test data
+
+Everything below uses the dev Postgres from `compose.dev.yml` (port 5433). The API runs migrations automatically on boot, and with `SEED_DEMO=true` in `.env` it seeds the demo workspace whenever the database is **completely empty** — so after any wipe, simply restarting `pnpm dev` gets you back to a working state.
+
+**Full reset (wipe everything, start clean):**
+
+```bash
+docker compose -f compose.dev.yml down -v     # destroys the Postgres volume (and MinIO if used)
+docker compose -f compose.dev.yml up -d
+rm -rf apps/server/data/storage               # uploaded files (images/voice notes) live outside the DB
+pnpm db:migrate                               # or just restart `pnpm dev` — it migrates on boot
+```
+
+**Quick wipe without touching containers** (keeps Postgres running, drops all data). Run from the **repo root** — `pnpm db:migrate` only exists there:
+
+```bash
+psql "postgres://kloop:kloop@localhost:5433/kloop" \
+  -c 'drop schema public cascade; create schema public;
+      drop schema if exists drizzle cascade; drop schema if exists pgboss cascade;'
+rm -rf apps/server/data/storage
+pnpm db:migrate
+```
+
+(The `drizzle` schema holds the migration journal — leave it behind and `db:migrate` will happily report "up to date" against an empty database. `pgboss` is the job queue.)
+
+**Seed the demo company** (Fjord Logistics IT — queue, articles, reviews, the demo accounts above):
+
+```bash
+pnpm seed
+```
+
+Seeding is additive: run it on a non-empty database and you get a *second* Fjord org (slug suffixed). For a clean demo state, wipe first, then seed.
+
+**Create a fresh company with a new admin** (no demo data):
+
+```bash
+pnpm --filter @kloop/server kloop admin create \
+  --org "Acme GmbH" --email you@acme.com --name "You" --password changeme123
+```
+
+Omit the flags for interactive prompts. From there, add people via **Admin → Users & roles** (invite by email, or create accounts directly with a name + password).
+
+A note on multiple orgs: they coexist fine (each gets a slug), but org resolution on the web is header → domain → *first org*, so a plain `localhost:5173` session lands in the org created first. The mobile app pins the org by slug when you connect. For predictable testing of a fresh company, wipe before you bootstrap it.
+
+The same commands work in the Docker deployment via the baked CLI:
+
+```bash
+docker compose down -v && docker compose up -d          # full reset
+docker compose exec api node dist/cli.js migrate
+docker compose exec api node dist/cli.js seed           # demo data
+docker compose exec api node dist/cli.js admin create   # fresh company + admin
+docker compose exec api node dist/cli.js doctor         # verify everything after
+```
+
 ### Mobile app
 
 ```bash

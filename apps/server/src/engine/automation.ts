@@ -52,7 +52,9 @@ async function articleSteps(articleId: string): Promise<{ title: string; steps: 
  */
 export async function tryAutoAnswer(requestId: string): Promise<boolean> {
   const request = await db.query.requests.findFirst({ where: eq(tables.requests.id, requestId) });
-  if (!request || request.status !== "open" || request.claimedBy || request.autoAnswered) return false;
+  // no author = guest request logged by a supporter — nobody to auto-answer
+  if (!request || !request.authorId || request.status !== "open" || request.claimedBy || request.autoAnswered) return false;
+  const authorId = request.authorId;
 
   const org = await db.query.orgs.findFirst({ where: eq(tables.orgs.id, request.orgId) });
   if (!org) return false;
@@ -120,7 +122,7 @@ export async function tryAutoAnswer(requestId: string): Promise<boolean> {
   });
   await notifyUser({
     orgId: request.orgId,
-    userId: request.authorId,
+    userId: authorId,
     type: "reply",
     title: `Suggested fix for: ${request.title.slice(0, 60)}`,
     body: body.slice(0, 140),
@@ -148,7 +150,9 @@ export async function draftReply(request: typeof tables.requests.$inferSelect): 
   if (!org) return null;
   if (effectiveTier(org, request.tags) < 1) return null;
 
-  const author = await db.query.users.findFirst({ where: eq(tables.users.id, request.authorId) });
+  const author = request.authorId
+    ? await db.query.users.findFirst({ where: eq(tables.users.id, request.authorId) })
+    : undefined;
   const precedents = await precedentsFor(request);
 
   const bestArticle = precedents.matchedArticles[0] ?? null;

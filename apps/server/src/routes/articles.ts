@@ -13,6 +13,7 @@ import {
   publishedArticleView,
 } from "../engine/articles.js";
 import { recordEvent } from "../lib/events.js";
+import { getStorage } from "../providers/storage/index.js";
 import { enqueueEmbed } from "../workers/queues.js";
 
 export const articleRoutes = new Hono<AppEnv>();
@@ -23,6 +24,27 @@ const blockSchema = z.object({
   contentMd: z.string().min(1).max(20_000),
   conditionText: z.string().max(500).nullable().optional(),
 });
+
+/**
+ * Adopt still-pending uploads as article media. Their OCR/transcripts feed the
+ * article embedding, so a screenshot inside a doc is findable by search.
+ * Returns how many were claimed so callers know to re-embed.
+ */
+async function claimArticleAttachments(orgId: string, articleId: string, attachmentIds: string[]): Promise<number> {
+  if (attachmentIds.length === 0) return 0;
+  const claimed = await db
+    .update(tables.attachments)
+    .set({ ownerKind: "article", ownerId: articleId })
+    .where(
+      and(
+        inArray(tables.attachments.id, attachmentIds),
+        eq(tables.attachments.orgId, orgId),
+        eq(tables.attachments.ownerKind, "pending"),
+      ),
+    )
+    .returning({ id: tables.attachments.id });
+  return claimed.length;
+}
 
 /**
  * KB browser. Requesters see published only; supporters can filter
@@ -88,7 +110,7 @@ articleRoutes.get("/", async (c) => {
   });
 });
 
-/** Full article view (blocks). Tombstones 301-redirect to their survivor. */
+/** Full article view (blocks + attachments). Tombstones 301-redirect to their survivor. */
 articleRoutes.get("/:id", async (c) => {
   const org = c.get("org");
   const user = c.get("user");
@@ -99,6 +121,13 @@ articleRoutes.get("/:id", async (c) => {
   if (user.role === "requester" && view.article.status !== "published") {
     return c.json({ error: "not found" }, 404);
   }
+
+  const attachmentRows = await db
+    .select()
+    .from(tables.attachments)
+    .where(and(eq(tables.attachments.ownerKind, "article"), eq(tables.attachments.ownerId, view.article.id)))
+    .orderBy(tables.attachments.createdAt);
+  const attachments = attachmentRows.map((a) => ({ id: a.id, filename: a.filename, mimeType: a.mimeType, kind: a.kind }));
 
   // view count + learning signal (fire and forget)
   db.update(tables.articles)
@@ -140,7 +169,7 @@ articleRoutes.get("/:id", async (c) => {
     }));
   }
 
-  return c.json({ ...view, provenance });
+  return c.json({ ...view, attachments, provenance });
 });
 
 /** Markdown export — docs are plain markdown, git-syncable, no lock-in. */
@@ -187,6 +216,7 @@ articleRoutes.post("/", requireRole("supporter"), async (c) => {
       summary: z.string().max(1000).default(""),
       tags: z.array(z.string()).max(10).default([]),
       blocks: z.array(blockSchema).min(1),
+      attachmentIds: z.array(z.string().uuid()).max(10).default([]),
       publish: z.boolean().default(false),
     })
     .parse(await c.req.json());
@@ -202,6 +232,10 @@ articleRoutes.post("/", requireRole("supporter"), async (c) => {
     status: body.publish ? "published" : "draft",
     confidence: 0.8,
   });
+
+  if ((await claimArticleAttachments(org.id, article.id, body.attachmentIds)) > 0) {
+    await enqueueEmbed("article", article.id);
+  }
 
   await recordEvent(org.id, "user", user.id, body.publish ? "article_published" : "article_created", {
     articleId: article.id,
@@ -219,6 +253,8 @@ articleRoutes.put("/:id", requireRole("supporter"), async (c) => {
       summary: z.string().max(1000).default(""),
       tags: z.array(z.string()).max(10).optional(),
       blocks: z.array(blockSchema).min(1),
+      attachmentIds: z.array(z.string().uuid()).max(10).default([]),
+      removeAttachmentIds: z.array(z.string().uuid()).max(20).default([]),
       changeNote: z.string().max(500).optional(),
       publish: z.boolean().default(true),
     })
@@ -253,6 +289,23 @@ articleRoutes.put("/:id", requireRole("supporter"), async (c) => {
   if (body.tags) patch.tags = body.tags;
   if (body.publish && article.status === "draft") patch.status = "published";
   await db.update(tables.articles).set(patch).where(eq(tables.articles.id, article.id));
+
+  const claimed = await claimArticleAttachments(org.id, article.id, body.attachmentIds);
+  if (body.removeAttachmentIds.length > 0) {
+    const removed = await db
+      .delete(tables.attachments)
+      .where(
+        and(
+          inArray(tables.attachments.id, body.removeAttachmentIds),
+          eq(tables.attachments.orgId, org.id),
+          eq(tables.attachments.ownerKind, "article"),
+          eq(tables.attachments.ownerId, article.id),
+        ),
+      )
+      .returning({ storageKey: tables.attachments.storageKey });
+    for (const r of removed) await getStorage().delete(r.storageKey).catch(() => {});
+  }
+  if (claimed > 0 || body.removeAttachmentIds.length > 0) await enqueueEmbed("article", article.id);
 
   await recordEvent(org.id, "user", user.id, "article_updated", { articleId: article.id, revisionId: revision.id });
   return c.json({ ok: true, revisionId: revision.id });

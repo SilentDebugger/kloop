@@ -8,10 +8,9 @@ import { colors, radii, type DeflectionSuggestion } from "@kloop/shared";
 import { api } from "../../src/api";
 import { useDrafts } from "../../src/store/drafts";
 import { useActiveWorkspace } from "../../src/store/connection";
-import { useVoiceNote } from "../../src/recorder";
-import { pickImage, uploadFile } from "../../src/uploads";
-import { Avatar, Card, Chip, Logo, SectionLabel, Spinner } from "../../src/ui";
-import { AttachmentTray, type LocalAttachment } from "../../src/ui/attachments";
+import { useComposerAttachments } from "../../src/uploads";
+import { Avatar, Card, Logo, SectionLabel, Spinner } from "../../src/ui";
+import { AttachChips, AttachmentTray } from "../../src/ui/attachments";
 
 /** Home — the one-box composer with live deflection ("What's not working?"). */
 export default function HomeScreen() {
@@ -20,9 +19,7 @@ export default function HomeScreen() {
   const { composerText, setComposerText, queue, dequeue } = useDrafts();
   const [text, setText] = useState(composerText);
   const [debounced, setDebounced] = useState("");
-  const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const voice = useVoiceNote();
+  const att = useComposerAttachments();
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
@@ -33,21 +30,20 @@ export default function HomeScreen() {
 
   // attachments deflect too (photo of an error screen, voice note); their
   // OCR/transcription lands async, so re-ask while the server reports pending
-  const attachmentIds = attachments.map((a) => a.id);
   const { data: deflect, isFetching } = useQuery({
-    queryKey: ["deflect", debounced, attachmentIds.join(",")],
-    queryFn: () => api.deflect(debounced, attachmentIds),
-    enabled: debounced.length >= 8 || attachmentIds.length > 0,
+    queryKey: ["deflect", debounced, att.ids.join(",")],
+    queryFn: () => api.deflect(debounced, att.ids),
+    enabled: debounced.length >= 8 || att.ids.length > 0,
     staleTime: 30_000,
     refetchInterval: (q) => ((q.state.data?.pendingAttachments ?? 0) > 0 ? 3000 : false),
   });
 
   const send = useMutation({
-    mutationFn: () => api.createRequest({ title: text.trim(), channel: "mobile", attachmentIds: attachments.map((a) => a.id) }),
+    mutationFn: () => api.createRequest({ title: text.trim(), channel: "mobile", attachmentIds: att.ids }),
     onSuccess: (res) => {
       setText("");
       setComposerText("");
-      setAttachments([]);
+      att.clear();
       router.push(`/request/${res.request.id}`);
     },
     onError: () => {
@@ -69,36 +65,8 @@ export default function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const attach = async (kind: "camera" | "photo" | "voice") => {
-    try {
-      if (kind === "voice") {
-        if (voice.recording) {
-          const note = await voice.stop();
-          if (note) {
-            setUploading(true);
-            const a = await uploadFile(note);
-            setAttachments((x) => [...x, { id: a.id, filename: a.filename, kind: "audio", localUri: note.uri, durationMs: note.durationMs }]);
-          }
-        } else {
-          await voice.start();
-        }
-        return;
-      }
-      const picked = await pickImage(kind === "camera");
-      if (picked) {
-        setUploading(true);
-        const a = await uploadFile(picked);
-        setAttachments((x) => [...x, { id: a.id, filename: a.filename, kind: a.kind, localUri: picked.uri }]);
-      }
-    } catch {
-      /* upload failed — keep composing */
-    } finally {
-      setUploading(false);
-    }
-  };
-
   const suggestions = deflect?.suggestions ?? [];
-  const canSend = text.trim().length >= 3 && !send.isPending && !uploading;
+  const canSend = text.trim().length >= 3 && !send.isPending && !att.uploading;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
@@ -137,30 +105,9 @@ export default function HomeScreen() {
               onChangeText={setText}
               style={{ minHeight: 64, fontSize: 16, color: colors.text, textAlignVertical: "top" }}
             />
-            <AttachmentTray items={attachments} onRemove={(rid) => setAttachments((x) => x.filter((y) => y.id !== rid))} />
+            <AttachmentTray items={att.attachments} onRemove={att.remove} />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Chip
-                label="Camera"
-                icon={<SymbolView name={{ ios: "camera", android: "photo_camera" }} size={13} tintColor={colors.text} />}
-                onPress={() => void attach("camera")}
-              />
-              <Chip
-                label="Photo"
-                icon={<SymbolView name={{ ios: "photo", android: "image" }} size={13} tintColor={colors.text} />}
-                onPress={() => void attach("photo")}
-              />
-              <Chip
-                label={voice.recording ? "Stop" : "Voice"}
-                active={voice.recording}
-                icon={
-                  <SymbolView
-                    name={voice.recording ? { ios: "stop.fill", android: "stop" } : { ios: "mic.fill", android: "mic" }}
-                    size={13}
-                    tintColor={voice.recording ? "#fff" : colors.text}
-                  />
-                }
-                onPress={() => void attach("voice")}
-              />
+              <AttachChips recording={att.recording} attach={att.attach} />
               <View style={{ flex: 1 }} />
               {/* same round submit as the chat composer — the chips need the width */}
               <Pressable
@@ -176,7 +123,7 @@ export default function HomeScreen() {
                   opacity: canSend ? 1 : 0.4,
                 }}
               >
-                {send.isPending || uploading ? (
+                {send.isPending || att.uploading ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <SymbolView name={{ ios: "arrow.up", android: "arrow_upward" }} size={17} weight="semibold" tintColor="#fff" />

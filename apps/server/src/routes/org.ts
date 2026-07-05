@@ -4,7 +4,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, tables } from "../db/index.js";
 import { requireAuth, requireRole } from "../http/middleware.js";
 import { orgSettings, type AppEnv } from "../http/context.js";
-import { generateToken, hashToken } from "../lib/crypto.js";
+import { generateToken, hashToken, hashPassword } from "../lib/crypto.js";
 import { sendMail } from "../lib/mail.js";
 import { config } from "../config.js";
 import { recordEvent } from "../lib/events.js";
@@ -69,6 +69,25 @@ orgRoutes.patch("/", requireRole("admin"), async (c) => {
   return c.json({ org: { ...updated, settings: orgSettings(updated) } });
 });
 
+/**
+ * Lightweight people directory for supporters — powers the "create a request
+ * for someone" picker. Active users only, no admin-level detail.
+ */
+orgRoutes.get("/directory", requireRole("supporter"), async (c) => {
+  const org = c.get("org");
+  const users = await db
+    .select({
+      id: tables.users.id,
+      name: tables.users.name,
+      email: tables.users.email,
+      role: tables.users.role,
+    })
+    .from(tables.users)
+    .where(and(eq(tables.users.orgId, org.id), isNull(tables.users.deactivatedAt)))
+    .orderBy(tables.users.name);
+  return c.json({ users });
+});
+
 // ---------------------------------------------------------------------------
 // Users & roles (admin)
 // ---------------------------------------------------------------------------
@@ -89,6 +108,42 @@ orgRoutes.get("/users", requireRole("admin"), async (c) => {
     .where(eq(tables.users.orgId, org.id))
     .orderBy(desc(tables.users.createdAt));
   return c.json({ users });
+});
+
+/**
+ * Create an account directly (no invite email) — for onboarding someone in
+ * person or when mail isn't set up. The admin picks the initial password and
+ * hands it over; the user signs in with email + that password.
+ */
+orgRoutes.post("/users", requireRole("admin"), async (c) => {
+  const org = c.get("org");
+  const admin = c.get("user");
+  const body = z
+    .object({
+      name: z.string().min(1).max(120),
+      email: z.string().email(),
+      password: z.string().min(8),
+      role: z.enum(["requester", "supporter", "admin"]).default("requester"),
+    })
+    .parse(await c.req.json());
+
+  const email = body.email.toLowerCase();
+  const existing = await db.query.users.findFirst({
+    where: and(eq(tables.users.orgId, org.id), eq(tables.users.email, email)),
+  });
+  if (existing) return c.json({ error: "a user with this email already exists" }, 409);
+
+  const [user] = await db
+    .insert(tables.users)
+    .values({ orgId: org.id, email, name: body.name, role: body.role, passwordHash: await hashPassword(body.password) })
+    .returning();
+  // a pending invite for the same address is now moot
+  await db
+    .delete(tables.invitations)
+    .where(and(eq(tables.invitations.orgId, org.id), eq(tables.invitations.email, email), isNull(tables.invitations.acceptedAt)));
+
+  await recordEvent(org.id, "user", admin.id, "user_created", { email, role: body.role });
+  return c.json({ user: { id: user.id, email: user.email, name: user.name, role: user.role } }, 201);
 });
 
 orgRoutes.patch("/users/:id", requireRole("admin"), async (c) => {

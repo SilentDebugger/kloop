@@ -26,6 +26,7 @@ function requestSummary(r: typeof tables.requests.$inferSelect) {
     ref: `REQ-${r.refNumber}`,
     title: r.title,
     body: r.body,
+    guestName: r.guestName,
     status: r.status,
     channel: r.channel,
     tags: r.tags,
@@ -86,8 +87,30 @@ requestRoutes.post("/", async (c) => {
       channel: z.enum(["web", "mobile", "email", "api"]).default("web"),
       tags: z.array(z.string()).max(10).default([]),
       attachmentIds: z.array(z.string().uuid()).max(10).default([]),
+      /** supporters can log a request for a user — or a guest without an account */
+      onBehalf: z
+        .object({
+          userId: z.string().uuid().optional(),
+          guestName: z.string().trim().min(1).max(120).optional(),
+        })
+        .refine((v) => !!v.userId !== !!v.guestName, { message: "exactly one of userId or guestName" })
+        .optional(),
     })
     .parse(await c.req.json());
+
+  let author: { id: string } | null = { id: user.id };
+  if (body.onBehalf) {
+    if (user.role === "requester") return c.json({ error: "forbidden" }, 403);
+    if (body.onBehalf.userId) {
+      const target = await db.query.users.findFirst({
+        where: and(eq(tables.users.id, body.onBehalf.userId), eq(tables.users.orgId, org.id)),
+      });
+      if (!target) return c.json({ error: "user not found" }, 404);
+      author = { id: target.id };
+    } else {
+      author = null; // guest — tracked by name only
+    }
+  }
 
   const refNumber = await nextCounter(org.id, "request");
   const [request] = await db
@@ -95,11 +118,14 @@ requestRoutes.post("/", async (c) => {
     .values({
       orgId: org.id,
       refNumber,
-      authorId: user.id,
+      authorId: author?.id ?? null,
+      guestName: body.onBehalf?.guestName ?? null,
       title: body.title,
       body: body.body,
       channel: body.channel,
       tags: body.tags,
+      // the supporter logging it is already handling it
+      ...(body.onBehalf ? { claimedBy: user.id, claimedAt: new Date(), status: "handled" } : {}),
     })
     .returning();
 
@@ -122,11 +148,26 @@ requestRoutes.post("/", async (c) => {
     ref: `REQ-${refNumber}`,
     title: request.title,
     channel: body.channel,
+    ...(body.onBehalf ? { onBehalf: true } : {}),
   });
   bus.publish(org.id, { type: "request_created", supporterOnly: true, data: requestSummary(request) });
 
-  // Tier 2/3 automation: try auto-answering once the embedding lands.
-  await enqueue(QUEUES.autoAnswer, { requestId: request.id }, { startAfterSeconds: 8 });
+  if (body.onBehalf) {
+    // no auto-answer — the supporter logging it is already on it
+    if (author && author.id !== user.id) {
+      await notifyUser({
+        orgId: org.id,
+        userId: author.id,
+        type: "system",
+        title: `${user.name} opened a request for you — ${request.title.slice(0, 60)}`,
+        body: "You'll get updates here as it's worked on.",
+        linkPath: `/requests/${request.id}`,
+      });
+    }
+  } else {
+    // Tier 2/3 automation: try auto-answering once the embedding lands.
+    await enqueue(QUEUES.autoAnswer, { requestId: request.id }, { startAfterSeconds: 8 });
+  }
 
   return c.json({ request: requestSummary(request) }, 201);
 });
@@ -222,7 +263,7 @@ requestRoutes.get("/", async (c) => {
   return c.json({
     requests: rows.map((r) => ({
       ...requestSummary(r),
-      author: byId[r.authorId] ?? null,
+      author: r.authorId ? (byId[r.authorId] ?? null) : null,
       claimer: r.claimedBy ? (byId[r.claimedBy] ?? null) : null,
     })),
   });
@@ -278,14 +319,17 @@ requestRoutes.get("/:id", async (c) => {
     );
 
   const userIds = [
-    ...new Set([
-      request.authorId,
-      ...(request.claimedBy ? [request.claimedBy] : []),
-      ...visibleMsgs.map((m) => m.authorId).filter(Boolean),
-      ...resolutionRows.map((r) => r.supporterId),
-    ] as string[]),
+    ...new Set(
+      [
+        request.authorId,
+        request.claimedBy,
+        ...visibleMsgs.map((m) => m.authorId),
+        ...resolutionRows.map((r) => r.supporterId),
+      ].filter(Boolean) as string[],
+    ),
   ];
-  const people = await db.select(userCols).from(tables.users).where(inArray(tables.users.id, userIds));
+  const people =
+    userIds.length > 0 ? await db.select(userCols).from(tables.users).where(inArray(tables.users.id, userIds)) : [];
   const byId = Object.fromEntries(people.map((p) => [p.id, p]));
 
   // mark read for the viewer's side
@@ -295,16 +339,18 @@ requestRoutes.get("/:id", async (c) => {
     await db.update(tables.requests).set({ unreadForRequester: false }).where(eq(tables.requests.id, request.id));
   }
 
-  // requester context for the workbench header: past request count
-  const [pastCount] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(tables.requests)
-    .where(and(eq(tables.requests.orgId, org.id), eq(tables.requests.authorId, request.authorId)));
+  // requester context for the workbench header: past request count (guests have no history)
+  const [pastCount] = request.authorId
+    ? await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(tables.requests)
+        .where(and(eq(tables.requests.orgId, org.id), eq(tables.requests.authorId, request.authorId)))
+    : [{ n: 1 }];
 
   return c.json({
     request: {
       ...requestSummary(request),
-      author: byId[request.authorId] ?? null,
+      author: request.authorId ? (byId[request.authorId] ?? null) : null,
       claimer: request.claimedBy ? (byId[request.claimedBy] ?? null) : null,
       authorPastRequests: pastCount?.n ?? 1,
     },
@@ -413,8 +459,10 @@ requestRoutes.post("/:id/messages", async (c) => {
     await addSystemMessage(org.id, request.id, `${user.name} is now handling this request.`);
   }
 
-  // supporter replies get embedded (mining undocumented answers)
-  if (isSupporter && body.kind === "message") await enqueueEmbed("message", message.id);
+  // every human chat message gets embedded — supporter replies feed answer
+  // mining, and the whole thread becomes findable in global search. Image/voice-
+  // only messages count too: their OCR/transcript joins the message embedding.
+  if (body.body.trim() || body.attachmentIds.length > 0) await enqueueEmbed("message", message.id);
 
   if (body.kind === "message") {
     const notifyTarget = isSupporter ? request.authorId : (request.claimedBy ?? null);
@@ -468,13 +516,15 @@ requestRoutes.post("/:id/claim", requireRole("supporter"), async (c) => {
 
   await recordEvent(org.id, "user", user.id, "request_claimed", { requestId: request.id });
   await addSystemMessage(org.id, request.id, `${user.name} is now handling this request.`);
-  await notifyUser({
-    orgId: org.id,
-    userId: request.authorId,
-    type: "status_change",
-    title: `Your request is being handled — ${request.title.slice(0, 60)}`,
-    linkPath: `/requests/${request.id}`,
-  });
+  if (request.authorId) {
+    await notifyUser({
+      orgId: org.id,
+      userId: request.authorId,
+      type: "status_change",
+      title: `Your request is being handled — ${request.title.slice(0, 60)}`,
+      linkPath: `/requests/${request.id}`,
+    });
+  }
   bus.publish(org.id, { type: "request_updated", data: requestSummary(updated) });
   return c.json({ request: requestSummary(updated) });
 });
@@ -715,15 +765,16 @@ requestRoutes.post("/:id/resolve", requireRole("supporter"), async (c) => {
     }
   }
 
+  // Guest requests have nobody to confirm the fix — resolving closes them.
   const [updated] = await db
     .update(tables.requests)
     .set({
-      status: "handled",
       claimedBy: request.claimedBy ?? user.id,
       claimedAt: request.claimedAt ?? new Date(),
-      confirmationState: "pending",
-      unreadForRequester: true,
       lastActivityAt: new Date(),
+      ...(request.authorId
+        ? { status: "handled", confirmationState: "pending", unreadForRequester: true }
+        : { status: "solved", solvedAt: new Date(), confirmationState: "confirmed" }),
     })
     .where(eq(tables.requests.id, request.id))
     .returning();
@@ -735,14 +786,16 @@ requestRoutes.post("/:id/resolve", requireRole("supporter"), async (c) => {
     skippedCapture: body.skipCapture,
   });
   await addSystemMessage(org.id, request.id, `${user.name} marked this as resolved.`);
-  await notifyUser({
-    orgId: org.id,
-    userId: request.authorId,
-    type: "status_change",
-    title: `Did this fix it? — ${request.title.slice(0, 60)}`,
-    body: "A supporter marked your request as resolved. Confirm to close it.",
-    linkPath: `/requests/${request.id}`,
-  });
+  if (request.authorId) {
+    await notifyUser({
+      orgId: org.id,
+      userId: request.authorId,
+      type: "status_change",
+      title: `Did this fix it? — ${request.title.slice(0, 60)}`,
+      body: "A supporter marked your request as resolved. Confirm to close it.",
+      linkPath: `/requests/${request.id}`,
+    });
+  }
   bus.publish(org.id, { type: "request_updated", data: requestSummary(updated) });
   return c.json({ request: requestSummary(updated), resolutionId });
 });

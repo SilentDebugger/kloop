@@ -1,5 +1,5 @@
-import { sql } from "drizzle-orm";
-import { db } from "../db/index.js";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { db, tables } from "../db/index.js";
 import { getEmbeddingProvider } from "../providers/embeddings/index.js";
 import { rrfFuse } from "./rrf.js";
 import { logger } from "../lib/logger.js";
@@ -25,6 +25,74 @@ export async function embedQuery(text: string, meta?: { orgId?: string; purpose?
     logger.warn("query embedding failed — falling back to keyword-only search", { err: String(err) });
     return null;
   }
+}
+
+/** Mean of the query embeddings — lets one KNN query blend typed text with photo/voice vectors. */
+function averageVectors(vecs: number[][]): number[] | null {
+  if (vecs.length === 0) return null;
+  if (vecs.length === 1) return vecs[0];
+  const out = new Array<number>(vecs[0].length).fill(0);
+  for (const v of vecs) for (let i = 0; i < out.length; i++) out[i] += v[i] / vecs.length;
+  return out;
+}
+
+export type MultimodalQuery = {
+  /** typed text plus OCR/transcripts of the attached media — drives the keyword half */
+  queryText: string;
+  /** text vector averaged with the media vectors — drives the KNN half */
+  vec: number[] | null;
+  /** attachments whose OCR/transcription/embedding hasn't landed yet — clients re-ask while > 0 */
+  pendingAttachments: number;
+};
+
+/**
+ * One query from typed text plus uploaded photos/voice notes. The attachments
+ * must still be ownerless ("pending") and belong to the asking user: their
+ * extracted text extends the keyword+text-vector half and their multimodal
+ * media embeddings are averaged into the query vector. Shared by live
+ * deflection and global/KB search.
+ */
+export async function multimodalQuery(
+  orgId: string,
+  text: string,
+  opts: { attachmentIds?: string[]; userId?: string; purpose?: string } = {},
+): Promise<MultimodalQuery> {
+  let queryText = text.trim();
+  let pendingAttachments = 0;
+  const vecs: number[][] = [];
+
+  if (opts.attachmentIds && opts.attachmentIds.length > 0) {
+    const rows = await db
+      .select({
+        extractedText: tables.attachments.extractedText,
+        embedding: tables.attachments.embedding,
+        embeddingStatus: tables.attachments.embeddingStatus,
+      })
+      .from(tables.attachments)
+      .where(
+        and(
+          inArray(tables.attachments.id, opts.attachmentIds),
+          eq(tables.attachments.orgId, orgId),
+          eq(tables.attachments.ownerKind, "pending"),
+          ...(opts.userId ? [eq(tables.attachments.ownerId, opts.userId)] : []),
+        ),
+      );
+    for (const a of rows) {
+      if (a.embeddingStatus === "pending") pendingAttachments++;
+      // The corpus (articles/requests/messages) is embedded as *text*, so the
+      // OCR/transcript is the strong bridge — raw media vectors sit in a
+      // different region of the space (~0.4 cosine vs text) and only help
+      // when extraction yielded nothing.
+      if (a.extractedText) queryText = `${queryText}\n${a.extractedText}`.trim();
+      else if (a.embedding) vecs.push(a.embedding as number[]);
+    }
+  }
+
+  if (queryText) {
+    const textVec = await embedQuery(queryText, { orgId, purpose: opts.purpose ?? "search_query" });
+    if (textVec) vecs.unshift(textVec);
+  }
+  return { queryText, vec: averageVectors(vecs), pendingAttachments };
 }
 
 type Row = Record<string, unknown>;
@@ -185,4 +253,15 @@ export async function searchAllRequests(
   const limit = opts.limit ?? 8;
   const vec = opts.vec !== undefined ? opts.vec : await embedQuery(queryText, { orgId });
   return hybrid("requests", orgId, queryText, vec, "", limit);
+}
+
+/** Chat search: human messages (replies + internal notes) for global search. */
+export async function searchMessages(
+  orgId: string,
+  queryText: string,
+  opts: { limit?: number; vec?: number[] | null } = {},
+): Promise<HybridHit[]> {
+  const limit = opts.limit ?? 8;
+  const vec = opts.vec !== undefined ? opts.vec : await embedQuery(queryText, { orgId });
+  return hybrid("messages", orgId, queryText, vec, "and kind in ('message', 'internal_note')", limit);
 }

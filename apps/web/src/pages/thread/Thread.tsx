@@ -43,6 +43,22 @@ export function ThreadPage() {
 /* Requester thread — status timeline + confirm loop                     */
 /* ===================================================================== */
 
+/**
+ * What was sent when the request was created, rendered like a chat message —
+ * the intake photo / voice note would otherwise be invisible in the thread.
+ */
+function originalMessage({ request, attachments }: RequestDetail): MessageView | null {
+  if (!request.body.trim() && attachments.length === 0) return null;
+  return {
+    id: "original",
+    kind: "message",
+    body: request.body,
+    author: request.author ?? (request.guestName ? { id: "guest", name: request.guestName } : null),
+    createdAt: request.createdAt,
+    attachments,
+  };
+}
+
 function RequesterThreadView({ detail }: { detail: RequestDetail }) {
   const { t } = useTranslation();
   const { request, messages } = detail;
@@ -72,9 +88,9 @@ function RequesterThreadView({ detail }: { detail: RequestDetail }) {
       <StatusTimeline status={request.status} />
 
       <div className="flex flex-col gap-3 pb-44">
-        {messages.map((m) => (
-          <MessageBubble key={m.id} m={m} ownId={user?.id ?? ""} />
-        ))}
+        {[originalMessage(detail), ...messages].map(
+          (m) => m && <MessageBubble key={m.id} m={m} ownId={user?.id ?? ""} />,
+        )}
 
         {request.confirmationState === "pending" && (
           <div className="fade-up rounded-card bg-mint p-5">
@@ -225,9 +241,9 @@ function WorkbenchView({ detail }: { detail: RequestDetail }) {
       )}
 
       <div className="mt-4 flex flex-col gap-3 pb-52">
-        {messages.map((m) => (
-          <MessageBubble key={m.id} m={m} ownId={user?.id ?? ""} />
-        ))}
+        {[originalMessage(detail), ...messages].map(
+          (m) => m && <MessageBubble key={m.id} m={m} ownId={user?.id ?? ""} />,
+        )}
 
         {request.status !== "solved" && (
           <div className="mt-2 flex justify-center">

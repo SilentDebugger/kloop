@@ -74,6 +74,7 @@ export default function ReviewDetailScreen() {
         {isMerge ? <MergeBody payload={payload} /> : <DraftBody reviewId={id} payload={payload} onDone={done} />}
       </ScrollView>
 
+      {/* merge titles are similar lengths — equal halves keep both on one line */}
       <View style={{ position: "absolute", bottom: 24, left: 16, right: 16, flexDirection: "row", gap: 10 }}>
         <Button
           title={isMerge ? "Keep separate" : "Reject"}
@@ -84,7 +85,7 @@ export default function ReviewDetailScreen() {
         />
         <Button
           title={isMerge ? "Approve merge" : "Approve & publish"}
-          style={{ flex: 2 }}
+          style={{ flex: isMerge ? 1 : 2 }}
           loading={approve.isPending}
           onPress={() => approve.mutate()}
         />
