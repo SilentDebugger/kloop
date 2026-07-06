@@ -19,7 +19,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Attach photos of the problem to your request.",
         "NSMicrophoneUsageDescription": "Record a voice note describing the problem or the fix.",
-        "NSPhotoLibraryUsageDescription": "Attach screenshots or photos to your request."
+        "NSPhotoLibraryUsageDescription": "Attach screenshots or photos to your request.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -30,7 +31,13 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "permissions": ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"],
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -41,14 +48,33 @@
       "expo-secure-store",
       [
         "expo-camera",
-        { "cameraPermission": "kloop uses the camera to scan workspace QR codes and attach photos." }
+        {
+          "cameraPermission": "kloop uses the camera to scan workspace QR codes and attach photos."
+        }
       ],
-      ["expo-image-picker", { "photosPermission": "kloop attaches photos you pick to your requests." }],
-      ["expo-audio", { "microphonePermission": "kloop records voice notes you attach to requests." }],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "kloop attaches photos you pick to your requests."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "kloop records voice notes you attach to requests."
+        }
+      ],
       "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "3013b63c-21b2-4c2d-a751-1c4021d53ba0"
+      }
+    },
+    "owner": "silentdebugger"
   }
 }
