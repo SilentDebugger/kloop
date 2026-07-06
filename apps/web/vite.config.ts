@@ -30,6 +30,7 @@ export default defineConfig({
     }),
   ],
   server: {
+    host: true, // listen on the LAN so phones on the same Wi-Fi can open dev links
     port: 5173,
     proxy: {
       "/api": { target: "http://localhost:8787", changeOrigin: false },
