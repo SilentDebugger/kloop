@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.kloop.mobile",
+      "bundleIdentifier": "ch.enginess.kloop",
       "infoPlist": {
         "NSCameraUsageDescription": "Attach photos of the problem to your request.",
         "NSMicrophoneUsageDescription": "Record a voice note describing the problem or the fix.",
@@ -24,7 +24,7 @@
       }
     },
     "android": {
-      "package": "app.kloop.mobile",
+      "package": "ch.enginess.kloop",
       "adaptiveIcon": {
         "backgroundColor": "#F4F2EC",
         "foregroundImage": "./assets/android-icon-foreground.png",
