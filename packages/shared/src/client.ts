@@ -11,6 +11,7 @@ import type {
   DiscoveryDoc,
   MessageView,
   NotificationView,
+  OnboardingStatus,
   Precedents,
   RequestDetail,
   RequestSummary,
@@ -75,8 +76,8 @@ export class KloopClient {
   private patch<T>(path: string, body: unknown): Promise<T> {
     return this.request<T>(path, { method: "PATCH", body: JSON.stringify(body) });
   }
-  private del<T>(path: string): Promise<T> {
-    return this.request<T>(path, { method: "DELETE" });
+  private del<T>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>(path, { method: "DELETE", ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
   }
 
   // ---- discovery & auth ----
@@ -116,6 +117,9 @@ export class KloopClient {
   registerPushToken(token: string, platform = "expo") {
     return this.post<{ ok: true }>("/api/auth/push-token", { token, platform });
   }
+  deletePushToken(token: string) {
+    return this.del<{ ok: true }>("/api/auth/push-token", { token });
+  }
 
   // ---- org ----
   org() {
@@ -141,6 +145,12 @@ export class KloopClient {
   }
   revokeInvitation(id: string) {
     return this.del<{ ok: true }>(`/api/org/invitations/${id}`);
+  }
+  onboarding() {
+    return this.get<OnboardingStatus>("/api/org/onboarding");
+  }
+  dismissOnboarding() {
+    return this.patch<{ org: Record<string, unknown> }>("/api/org", { settings: { onboardingDismissed: true } });
   }
 
   // ---- requests ----

@@ -213,7 +213,7 @@ export default function NewRequestScreen() {
       </View>
 
       <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
-        <AttachChips recording={att.recording} attach={att.attach} chipStyle={{ flex: 1, justifyContent: "center" }} />
+        <AttachChips recording={att.recording} attach={att.attach} error={att.error} onDismissError={att.dismissError} chipStyle={{ flex: 1, justifyContent: "center" }} />
       </View>
 
       <View style={{ marginTop: 20 }}>

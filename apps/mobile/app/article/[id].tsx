@@ -7,7 +7,7 @@ import { colors, radii, type ArticleBlockView } from "@kloop/shared";
 import { api } from "../../src/api";
 import { timeAgo } from "../../src/format";
 import { useDrafts } from "../../src/store/drafts";
-import { Button, Card, Chip, SectionLabel, Spinner } from "../../src/ui";
+import { Button, Card, Chip, GlassSurface, SectionLabel, Spinner } from "../../src/ui";
 import { RemoteAttachments } from "../../src/ui/attachments";
 import { MarkdownLite } from "../../src/ui/MarkdownLite";
 
@@ -71,11 +71,10 @@ export default function ArticleScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: answerMode ? 170 : 60 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 8, paddingBottom: 8 }}>
-          <Pressable
-            onPress={() => router.back()}
-            style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }}
-          >
-            <Text style={{ fontSize: 18, color: colors.text }}>‹</Text>
+          <Pressable onPress={() => router.back()}>
+            <GlassSurface interactive fallbackColor={colors.card} style={{ width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ fontSize: 18, color: colors.text }}>‹</Text>
+            </GlassSurface>
           </Pressable>
           <Text style={{ fontWeight: "700", fontSize: 16, color: colors.text }}>{answerMode ? "Suggested answer" : article.kb}</Text>
         </View>
@@ -108,6 +107,28 @@ export default function ArticleScreen() {
         </View>
 
         <RemoteAttachments items={data.attachments} style={{ marginTop: 12 }} />
+
+        {(data.related?.length ?? 0) > 0 && (
+          <View style={{ marginTop: 20 }}>
+            <SectionLabel>See also</SectionLabel>
+            <View style={{ gap: 8, marginTop: 8 }}>
+              {data.related!.map((r) => (
+                <Pressable key={r.id} onPress={() => router.push(`/article/${r.id}`)}>
+                  <GlassSurface
+                    interactive
+                    fallbackColor={colors.card}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 10, borderRadius: radii.md, paddingHorizontal: 14, paddingVertical: 11 }}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textFaint }}>{r.kb}</Text>
+                    <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, fontWeight: "600", color: colors.text }}>
+                      {r.title}
+                    </Text>
+                  </GlassSurface>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 18 }}>
           <Text style={{ fontSize: 14, color: colors.textSecondary }}>Was this helpful?</Text>

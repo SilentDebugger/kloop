@@ -8,10 +8,11 @@ import { PageHeader } from "../../shell/AppShell";
 import { Avatar, Button, Card, Input, SectionLabel, Sheet, Toggle } from "../../ui";
 import { IconChevron } from "../../ui/icons";
 
+// keys must match PREF_BY_TYPE in apps/server/src/lib/notify.ts
 const NOTIFICATION_PREFS: { key: string; label: string }[] = [
   { key: "replies", label: "Replies" },
-  { key: "status_changes", label: "Status changes" },
-  { key: "review_items", label: "Review items" },
+  { key: "statusChanges", label: "Status changes" },
+  { key: "reviewItems", label: "Review items" },
 ];
 
 export function SettingsPage() {
@@ -67,7 +68,7 @@ export function SettingsPage() {
       {/* notifications */}
       <SectionLabel className="mb-2 mt-7 px-1">{t("settings.notifications")}</SectionLabel>
       <Card className="divide-y divide-line">
-        {NOTIFICATION_PREFS.filter((p) => p.key !== "review_items" || user.role !== "requester").map((p) => (
+        {NOTIFICATION_PREFS.filter((p) => p.key !== "reviewItems" || user.role !== "requester").map((p) => (
           <div key={p.key} className="flex items-center justify-between px-4 py-3.5">
             <span className="text-[15px] font-medium">{p.label}</span>
             <Toggle
@@ -107,7 +108,7 @@ export function SettingsPage() {
               void i18n.changeLanguage(e.target.value);
               api.updateProfile({ language: e.target.value }).then((res) => setUser(res.user)).catch(() => {});
             }}
-            className="cursor-pointer bg-transparent text-[14px] text-ink-secondary outline-none"
+            className="glass cursor-pointer rounded-full px-3 py-1.5 text-[14px] text-ink outline-none"
           >
             <option value="en">English</option>
           </select>

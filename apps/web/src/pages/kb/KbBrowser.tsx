@@ -7,7 +7,7 @@ import { api } from "../../lib/api";
 import { isSupporter as roleIsSupporter, useAuth } from "../../lib/auth";
 import { timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
-import { Button, Card, Chip, EmptyState, Input, Segmented, Spinner } from "../../ui";
+import { Button, Card, Chip, EmptyState, ErrorState, Input, Segmented, Spinner } from "../../ui";
 import { MediaQueryBar, useComposerAttachments } from "../../ui/attachments";
 import { IconChevron, IconPlus } from "../../ui/icons";
 
@@ -39,7 +39,7 @@ export function KbBrowserPage() {
   if (tag) params.tag = tag;
   if (supporter && status !== "published") params.status = status;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["articles", params],
     queryFn: () => api.articles(params),
   });
@@ -97,7 +97,9 @@ export function KbBrowserPage() {
         </div>
       )}
 
-      {loading ? (
+      {!searching && error && !data ? (
+        <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />
+      ) : loading ? (
         <div className="flex justify-center pt-16">
           <Spinner size={26} />
         </div>

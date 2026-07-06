@@ -6,7 +6,7 @@ import type { ReviewListItem } from "@kloop/shared";
 import { api } from "../../lib/api";
 import { timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
-import { Button, Card, EmptyState, KindBadge, Segmented, Spinner } from "../../ui";
+import { Button, Card, EmptyState, ErrorState, KindBadge, Segmented, Spinner } from "../../ui";
 
 type Tab = "draft" | "update" | "merge";
 
@@ -16,7 +16,7 @@ export function ReviewsPage() {
   const [tab, setTab] = useState<Tab>("draft");
 
   const { data: countsData } = useQuery({ queryKey: ["review-counts"], queryFn: () => api.reviewCounts() });
-  const { data, isLoading } = useQuery({ queryKey: ["reviews", "list"], queryFn: () => api.reviews() });
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ["reviews", "list"], queryFn: () => api.reviews() });
 
   const counts = countsData?.counts;
   const items = data?.items ?? [];
@@ -42,7 +42,9 @@ export function ReviewsPage() {
         />
       </div>
 
-      {isLoading ? (
+      {error && !data ? (
+        <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />
+      ) : isLoading ? (
         <div className="flex justify-center pt-16">
           <Spinner size={26} />
         </div>

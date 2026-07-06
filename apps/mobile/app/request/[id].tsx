@@ -8,6 +8,8 @@ import {
   Text,
   TextInput,
   View,
+  type ViewProps,
+  type ViewStyle,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,13 +17,13 @@ import { BlurView } from "expo-blur";
 import { SymbolView } from "expo-symbols";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { colors, radii, type MessageView, type RequestDetail, type RequestSummary, type ResolutionView } from "@kloop/shared";
+import { autoAnswerSkipLabel, colors, radii, type MessageView, type RequestDetail, type RequestSummary, type ResolutionView } from "@kloop/shared";
 import { api } from "../../src/api";
 import { clockTime, sentLabel } from "../../src/format";
 import { useActiveWorkspace } from "../../src/store/connection";
 import { pickImage, uploadFile } from "../../src/uploads";
 import { useVoiceNote } from "../../src/recorder";
-import { Button, Chip, SectionLabel, Spinner, StatusBadge } from "../../src/ui";
+import { Button, Chip, GlassSurface, liquidGlass, SectionLabel, Spinner, StatusBadge } from "../../src/ui";
 import { AttachmentTray, RemoteAttachments, type LocalAttachment } from "../../src/ui/attachments";
 
 /** Request thread — requester confirm loop / supporter workbench in one route. */
@@ -74,11 +76,10 @@ function BackHeader({ title, subtitle, right }: { title: string; subtitle?: stri
   const router = useRouter();
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 8, paddingBottom: 10, paddingHorizontal: 16 }}>
-      <Pressable
-        onPress={() => router.back()}
-        style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }}
-      >
-        <Text style={{ fontSize: 18, color: colors.text }}>‹</Text>
+      <Pressable onPress={() => router.back()}>
+        <GlassSurface interactive fallbackColor={colors.card} style={{ width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" }}>
+          <Text style={{ fontSize: 18, color: colors.text }}>‹</Text>
+        </GlassSurface>
       </Pressable>
       <View style={{ flex: 1 }}>
         <Text numberOfLines={1} style={{ fontWeight: "700", fontSize: 15, color: colors.text }}>
@@ -277,6 +278,20 @@ function Workbench({ detail }: { detail: RequestDetail }) {
           keyboardDismissMode="interactive"
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: composerH + 12, gap: 10 }}
         >
+          {detail.autoAnswerSkip && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.surface, borderRadius: radii.md, paddingVertical: 10, paddingHorizontal: 14 }}>
+              <Text style={{ fontSize: 13, color: colors.textSecondary }}>✦</Text>
+              <Text style={{ flex: 1, fontSize: 13, fontWeight: "500", color: colors.textSecondary, lineHeight: 18 }}>
+                {autoAnswerSkipLabel(detail.autoAnswerSkip)}
+              </Text>
+              {detail.autoAnswerSkip.articleId && (
+                <Pressable onPress={() => router.push(`/article/${detail.autoAnswerSkip!.articleId}`)}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.primary }}>View ›</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+
           {(similar.length > 0 || matched.length > 0) && (
             <View style={{ backgroundColor: colors.mint, borderRadius: radii.lg, padding: 14, gap: 8 }}>
               <SectionLabel color={colors.primary}>Precedents · {similar.length} similar solved</SectionLabel>
@@ -446,18 +461,16 @@ function Composer({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const voice = useVoiceNote();
 
-  const [draftWanted, setDraftWanted] = useState(false);
-  const { data: draft, isFetching: draftLoading } = useQuery({
-    queryKey: ["ai-draft", requestId],
-    queryFn: () => api.aiDraft(requestId),
-    enabled: !!supporter && draftWanted,
-    staleTime: Infinity,
+  // every tap generates a fresh draft from the current thread
+  const draft = useMutation({
+    mutationFn: () => api.aiDraft(requestId),
+    onSuccess: (res) => {
+      if (res.draft) {
+        setText(res.draft.body);
+        setFromDraft(true);
+      }
+    },
   });
-
-  if (draftWanted && draft?.draft && !text && !fromDraft) {
-    setText(draft.draft.body);
-    setFromDraft(true);
-  }
 
   const send = useMutation({
     mutationFn: () =>
@@ -515,9 +528,7 @@ function Composer({
   const canSend = (text.trim().length > 0 || attachments.length > 0) && !send.isPending && !uploading;
 
   return (
-    <BlurView
-      intensity={40}
-      tint="extraLight"
+    <ComposerBar
       onLayout={(e) => onHeightChange?.(e.nativeEvent.layout.height)}
       style={{
         position: "absolute",
@@ -528,14 +539,13 @@ function Composer({
         paddingTop: 8,
         paddingBottom: keyboardUp ? 8 : Math.max(insets.bottom, 12),
         gap: 8,
-        backgroundColor: "rgba(244, 242, 236, 0.72)",
       }}
     >
       {supporter && (
         <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 4 }}>
           <Chip
-            label={draftLoading ? "Drafting…" : draft?.draft ? "✦ AI draft ready" : "✦ AI draft"}
-            onPress={() => setDraftWanted(true)}
+            label={draft.isPending ? "Drafting…" : fromDraft ? "✦ Redraft" : "✦ AI draft"}
+            onPress={() => !draft.isPending && draft.mutate()}
             style={{ backgroundColor: colors.mint }}
           />
           <Chip label="Internal note" active={note} onPress={() => setNote((n) => !n)} />
@@ -560,15 +570,24 @@ function Composer({
           elevation: 4,
         }}
       >
-        <Pressable onPress={() => void attach()} disabled={uploading} style={roundBtn(colors.chip)}>
-          {uploading ? (
-            <ActivityIndicator size="small" color={colors.textSecondary} />
-          ) : (
-            <SymbolView name={{ ios: "plus", android: "add" }} size={18} tintColor={colors.textSecondary} />
-          )}
+        <Pressable onPress={() => void attach()} disabled={uploading}>
+          <GlassSurface interactive fallbackColor={colors.chip} style={roundBtn()}>
+            {uploading ? (
+              <ActivityIndicator size="small" color={colors.textSecondary} />
+            ) : (
+              <SymbolView name={{ ios: "plus", android: "add" }} size={18} tintColor={colors.textSecondary} />
+            )}
+          </GlassSurface>
         </Pressable>
-        <Pressable onPress={() => void toggleVoice()} style={roundBtn(voice.recording ? colors.danger : colors.chip)}>
-          <SymbolView name={{ ios: "mic.fill", android: "mic" }} size={17} tintColor={voice.recording ? "#fff" : colors.textSecondary} />
+        <Pressable onPress={() => void toggleVoice()}>
+          <GlassSurface
+            interactive
+            fallbackColor={colors.chip}
+            tintColor={voice.recording ? colors.danger : undefined}
+            style={roundBtn()}
+          >
+            <SymbolView name={{ ios: "mic.fill", android: "mic" }} size={17} tintColor={voice.recording ? "#fff" : colors.textSecondary} />
+          </GlassSurface>
         </Pressable>
         {/* auto-grows natively while typing; the explicit height when empty
             forces the snap back to one line after send (Fabric doesn't
@@ -591,14 +610,34 @@ function Composer({
             paddingHorizontal: 4,
           }}
         />
-        <Pressable onPress={() => send.mutate()} disabled={!canSend} style={[roundBtn(colors.primary), { opacity: canSend ? 1 : 0.4 }]}>
+        <Pressable
+          onPress={() => send.mutate()}
+          disabled={!canSend}
+          style={[roundBtn(), { backgroundColor: colors.primary, opacity: canSend ? 1 : 0.4 }]}
+        >
           <SymbolView name={{ ios: "arrow.up", android: "arrow_upward" }} size={18} weight="semibold" tintColor="#fff" />
         </Pressable>
       </View>
+    </ComposerBar>
+  );
+}
+
+/** Floating input bar: Liquid Glass on iOS 26+, classic material blur below. */
+function ComposerBar({ children, style, onLayout }: { children: React.ReactNode; style: ViewStyle; onLayout: ViewProps["onLayout"] }) {
+  if (liquidGlass) {
+    return (
+      <GlassSurface fallbackColor="transparent" style={style} onLayout={onLayout}>
+        {children}
+      </GlassSurface>
+    );
+  }
+  return (
+    <BlurView intensity={40} tint="extraLight" onLayout={onLayout} style={[style, { backgroundColor: "rgba(244, 242, 236, 0.72)" }]}>
+      {children}
     </BlurView>
   );
 }
 
-function roundBtn(bg: string) {
-  return { width: 40, height: 40, borderRadius: 20, backgroundColor: bg, alignItems: "center" as const, justifyContent: "center" as const };
+function roundBtn() {
+  return { width: 40, height: 40, borderRadius: 20, alignItems: "center" as const, justifyContent: "center" as const };
 }

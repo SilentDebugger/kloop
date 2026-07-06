@@ -28,6 +28,9 @@ FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
+# pg_dump/pg_restore for `kloop backup` / `kloop restore`
+RUN apk add --no-cache postgresql16-client
+
 COPY --from=build /app/apps/server/dist ./dist
 COPY --from=build /app/apps/server/drizzle ./drizzle
 COPY --from=build /app/apps/server/static ./static

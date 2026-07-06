@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "@kloop/shared";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import { appDeepLink, isMobileUserAgent } from "../../lib/deepLink";
 import { Button, ErrorNote, Input } from "../../ui";
 
 /** Landing page for invitation emails: /auth/invite?token=... */
@@ -11,6 +12,7 @@ export function InvitePage() {
   const navigate = useNavigate();
   const setSession = useAuth((s) => s.setSession);
   const token = params.get("token") ?? "";
+  const appLink = isMobileUserAgent() ? appDeepLink("auth/invite", token || null) : null;
 
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -58,6 +60,13 @@ export function InvitePage() {
             Create account
           </Button>
         </form>
+        {appLink && (
+          <a href={appLink} className="mt-4 block">
+            <Button variant="secondary" className="w-full">
+              Open in the kloop app
+            </Button>
+          </a>
+        )}
       </div>
     </div>
   );

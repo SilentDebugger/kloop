@@ -27,6 +27,11 @@ export async function registerWorkers(boss: PgBoss): Promise<void> {
     for (const job of jobs) await tryAutoAnswer(job.data.requestId);
   });
 
+  await boss.work<{ requestId: string }>(QUEUES.autoTag, { pollingIntervalSeconds: 2 }, async (jobs) => {
+    const { autoTagRequest } = await import("../engine/autoTag.js");
+    for (const job of jobs) await autoTagRequest(job.data.requestId);
+  });
+
   // ---- scheduled scans (cron lives in Postgres via pg-boss) ----
 
   await boss.work(QUEUES.clusterScan, { pollingIntervalSeconds: 5 }, async () => {
@@ -44,9 +49,15 @@ export async function registerWorkers(boss: PgBoss): Promise<void> {
     await forEachOrg((orgId) => freshnessScan(orgId).then(() => {}));
   });
 
+  await boss.work(QUEUES.autoCloseScan, { pollingIntervalSeconds: 30 }, async () => {
+    const { autoCloseScan } = await import("../engine/automation.js");
+    await forEachOrg((orgId) => autoCloseScan(orgId).then(() => {}));
+  });
+
   await boss.schedule(QUEUES.clusterScan, "*/5 * * * *"); // every 5 minutes
   await boss.schedule(QUEUES.mergeScan, "20 * * * *"); // hourly
   await boss.schedule(QUEUES.freshnessScan, "40 3 * * *"); // nightly
+  await boss.schedule(QUEUES.autoCloseScan, "10 * * * *"); // hourly (tier 3 auto-close)
 }
 
 async function forEachOrg(fn: (orgId: string) => Promise<void>): Promise<void> {

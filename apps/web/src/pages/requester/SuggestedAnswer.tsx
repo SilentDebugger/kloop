@@ -7,7 +7,7 @@ import { timeAgo } from "../../lib/format";
 import { useDrafts } from "../../lib/drafts";
 import { ArticleBlocks } from "../kb/ArticleBlocks";
 import { BackBar } from "../shared/BackBar";
-import { Button, Chip, Spinner } from "../../ui";
+import { Button, Chip, ErrorState, Spinner } from "../../ui";
 
 /**
  * "Suggested answer" — shown when a deflection suggestion is tapped.
@@ -23,7 +23,7 @@ export function SuggestedAnswerPage() {
   const { setComposerText } = useDrafts();
   const [feedback, setFeedback] = useState<null | boolean>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["article", articleId],
     queryFn: () => api.article(articleId!),
     enabled: !!articleId,
@@ -51,6 +51,7 @@ export function SuggestedAnswerPage() {
     void api.articleFeedback(articleId!, helpful).catch(() => {});
   };
 
+  if (error && !data) return <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />;
   if (isLoading || !data) {
     return (
       <div className="flex justify-center pt-24">

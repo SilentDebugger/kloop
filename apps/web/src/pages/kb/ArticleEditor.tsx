@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import { Button, Chip, ErrorNote, Input, SectionLabel, Spinner } from "../../ui";
+import { Button, Chip, ErrorNote, ErrorState, Input, SectionLabel, Spinner } from "../../ui";
 import { MediaQueryBar, useComposerAttachments } from "../../ui/attachments";
 import { IconPlus, IconX } from "../../ui/icons";
 import { BackBar } from "../shared/BackBar";
@@ -24,7 +24,7 @@ export function ArticleEditorPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["article", id],
     queryFn: () => api.article(id!),
     enabled: !isNew,
@@ -79,6 +79,7 @@ export function ArticleEditorPage() {
     },
   });
 
+  if (!isNew && error && !data) return <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />;
   if (!isNew && (isLoading || !data)) {
     return (
       <div className="flex justify-center pt-24">

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { api } from "../../lib/api";
 import { Markdown } from "../../lib/markdown";
-import { Button, ErrorNote, Input, SectionLabel, Spinner } from "../../ui";
+import { Button, ErrorNote, ErrorState, Input, SectionLabel, Spinner } from "../../ui";
 import { BackBar } from "../shared/BackBar";
 
 type BlockShape = { id?: string; kind: string; conditionText: string | null; contentMd: string; position?: number };
@@ -45,12 +45,13 @@ const kindLabels: Record<string, string> = {
 
 export function ReviewDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["reviews", "detail", id],
     queryFn: () => api.review(id!),
     enabled: !!id,
   });
 
+  if (error && !data) return <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />;
   if (isLoading || !data) {
     return (
       <div className="flex justify-center pt-24">

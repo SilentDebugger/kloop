@@ -22,10 +22,10 @@ type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "outline";
 const buttonStyles: Record<ButtonVariant, string> = {
   primary:
     "bg-primary text-white hover:bg-primary-dark active:bg-primary-dark disabled:opacity-50 shadow-sm",
-  secondary: "bg-chip text-ink hover:bg-line active:bg-line disabled:opacity-50",
-  ghost: "bg-transparent text-primary hover:bg-mint active:bg-mint disabled:opacity-40",
-  danger: "bg-card text-danger hover:bg-danger-soft active:bg-danger-soft disabled:opacity-50 shadow-sm",
-  outline: "bg-card text-ink border border-line hover:bg-surface active:bg-surface disabled:opacity-50 shadow-sm",
+  secondary: "glass text-ink hover:bg-white/65 active:bg-white/65 disabled:opacity-50",
+  ghost: "glass text-primary hover:bg-mint/70 active:bg-mint/70 disabled:opacity-40",
+  danger: "glass text-danger hover:bg-danger-soft/80 active:bg-danger-soft/80 disabled:opacity-50",
+  outline: "glass text-ink hover:bg-white/65 active:bg-white/65 disabled:opacity-50",
 };
 
 export const Button = forwardRef<
@@ -87,8 +87,8 @@ export function Chip({
     <Tag
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
-        active ? "bg-ink text-white" : "bg-chip text-ink"
-      } ${onClick ? "cursor-pointer hover:bg-line" : ""} ${active && onClick ? "hover:bg-ink" : ""} ${className}`}
+        active ? "glass-dark text-white" : "glass text-ink"
+      } ${onClick && !active ? "cursor-pointer hover:bg-white/65" : ""} ${onClick && active ? "cursor-pointer" : ""} ${className}`}
     >
       {children}
     </Tag>
@@ -188,6 +188,22 @@ export function EmptyState({ title, hint, icon }: { title: string; hint?: string
   );
 }
 
+/** Consistent query-failure state: message + retry, matching EmptyState's layout. */
+export function ErrorState({ message, onRetry }: { message?: string; onRetry?: () => void }) {
+  return (
+    <div className="fade-up flex flex-col items-center gap-2 py-16 text-center">
+      <Logo size={36} stroke={4} />
+      <div className="mt-2 font-semibold text-ink">Couldn't load this</div>
+      <div className="max-w-xs text-[13px] text-ink-secondary">{message ?? "Check your connection and try again."}</div>
+      {onRetry && (
+        <Button size="sm" variant="secondary" className="mt-3" onClick={onRetry}>
+          Try again
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function PageTitle({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <h1 className={`text-[28px] font-bold tracking-tight text-ink ${className}`}>{children}</h1>;
 }
@@ -203,7 +219,7 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="flex w-fit max-w-full items-center gap-1 overflow-x-auto rounded-full bg-chip p-1">
+    <div className="glass flex w-fit max-w-full items-center gap-1 overflow-x-auto rounded-full p-1">
       {options.map((o) => (
         <button
           key={o.value}

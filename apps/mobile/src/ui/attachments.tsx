@@ -117,11 +117,15 @@ export function AttachChips({
   attach,
   camera = true,
   chipStyle,
+  error,
+  onDismissError,
 }: {
   recording: boolean;
   attach: (kind: "camera" | "photo" | "voice") => Promise<void>;
   camera?: boolean;
   chipStyle?: ViewStyle;
+  error?: string | null;
+  onDismissError?: () => void;
 }) {
   return (
     <>
@@ -152,6 +156,15 @@ export function AttachChips({
         onPress={() => void attach("voice")}
         style={chipStyle}
       />
+      {error ? (
+        <Pressable
+          onPress={onDismissError}
+          style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(200,60,50,0.12)", borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 }}
+        >
+          <Text numberOfLines={1} style={{ color: colors.danger, fontSize: 12, fontWeight: "600", maxWidth: 200 }}>{error}</Text>
+          <SymbolView name={{ ios: "xmark", android: "close" }} size={10} weight="bold" tintColor={colors.danger} />
+        </Pressable>
+      ) : null}
     </>
   );
 }

@@ -5,11 +5,11 @@ import type { RequestSummary } from "@kloop/shared";
 import { api } from "../../lib/api";
 import { sentLabel, dateLabel } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
-import { Card, EmptyState, SectionLabel, Spinner, StatusBadge } from "../../ui";
+import { Card, EmptyState, ErrorState, SectionLabel, Spinner, StatusBadge } from "../../ui";
 
 export function MyRequestsPage() {
   const { t } = useTranslation();
-  const { data, isLoading } = useQuery({ queryKey: ["requests", "mine"], queryFn: () => api.requests() });
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ["requests", "mine"], queryFn: () => api.requests() });
 
   const open = (data?.requests ?? []).filter((r) => r.status !== "solved");
   const solved = (data?.requests ?? []).filter((r) => r.status === "solved");
@@ -17,7 +17,9 @@ export function MyRequestsPage() {
   return (
     <div className="mx-auto w-full max-w-xl px-4 pt-6 md:pt-10">
       <PageHeader title={t("nav.myRequests")} />
-      {isLoading ? (
+      {error && !data ? (
+        <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />
+      ) : isLoading ? (
         <div className="flex justify-center pt-16">
           <Spinner size={26} />
         </div>

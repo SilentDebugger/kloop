@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "@kloop/shared";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import { appDeepLink, isMobileUserAgent } from "../../lib/deepLink";
 import { Button, ErrorNote, Spinner } from "../../ui";
 
 /** Landing page for magic-link emails: /auth/verify?token=... */
@@ -12,6 +13,7 @@ export function VerifyPage() {
   const setSession = useAuth((s) => s.setSession);
   const [error, setError] = useState<string | null>(null);
   const fired = useRef(false);
+  const appLink = isMobileUserAgent() ? appDeepLink("auth/verify", params.get("token")) : null;
 
   useEffect(() => {
     const token = params.get("token");
@@ -46,6 +48,11 @@ export function VerifyPage() {
           <Spinner size={26} />
           <div className="text-[14px] text-ink-secondary">Signing you in…</div>
         </>
+      )}
+      {appLink && (
+        <a href={appLink} className="mt-2">
+          <Button variant="secondary">Open in the kloop app</Button>
+        </a>
       )}
     </div>
   );

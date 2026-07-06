@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import type { AttachmentRef, MessageView, RequestDetail } from "@kloop/shared";
+import { autoAnswerSkipLabel, type AttachmentRef, type MessageView, type RequestDetail } from "@kloop/shared";
 import { api } from "../../lib/api";
 import { isSupporter as roleIsSupporter, useAuth } from "../../lib/auth";
 import { clockTime, sentLabel } from "../../lib/format";
 import { useVoiceRecorder } from "../../lib/recorder";
-import { Button, Card, Chip, SectionLabel, Spinner, StatusBadge } from "../../ui";
+import { Button, Card, Chip, ErrorState, SectionLabel, Spinner, StatusBadge } from "../../ui";
 import { IconCheck, IconMic, IconPaperclip, IconSend, IconSparkle, IconX } from "../../ui/icons";
 import { BackBar } from "../shared/BackBar";
 import { ResolveSheet } from "./ResolveSheet";
@@ -17,13 +17,14 @@ export function ThreadPage() {
   const user = useAuth((s) => s.user);
   const supporter = roleIsSupporter(user);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["request", id],
     queryFn: () => api.requestDetail(id!),
     enabled: !!id,
     refetchInterval: 30_000,
   });
 
+  if (error && !data) return <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />;
   if (isLoading || !data) {
     return (
       <div className="flex justify-center pt-24">
@@ -213,6 +214,19 @@ function WorkbenchView({ detail }: { detail: RequestDetail }) {
         }
       />
 
+      {/* supporter-only: why the AI stayed out of this thread */}
+      {detail.autoAnswerSkip && (
+        <div className="fade-up mt-4 flex items-center gap-2.5 rounded-inner bg-surface px-4 py-2.5 text-[13px] font-medium text-ink-secondary">
+          <span aria-hidden>✦</span>
+          <span className="min-w-0 flex-1">{autoAnswerSkipLabel(detail.autoAnswerSkip)}</span>
+          {detail.autoAnswerSkip.articleId && (
+            <Link to={`/kb/${detail.autoAnswerSkip.articleId}`} className="shrink-0 font-semibold text-primary">
+              View article ›
+            </Link>
+          )}
+        </div>
+      )}
+
       {/* precedents banner */}
       {(similar.length > 0 || matched.length > 0) && (
         <div className="fade-up mt-4 rounded-card bg-mint p-4">
@@ -365,23 +379,17 @@ function Composer({ requestId, supporter }: { requestId: string; supporter?: boo
   const recorder = useVoiceRecorder();
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // AI draft (supporters): fetched lazily on demand
-  const [draftWanted, setDraftWanted] = useState(false);
-  const { data: draft, isFetching: draftLoading } = useQuery({
-    queryKey: ["ai-draft", requestId],
-    queryFn: () => api.aiDraft(requestId),
-    enabled: !!supporter && draftWanted,
-    staleTime: Infinity,
+  // AI draft (supporters): every click generates a fresh draft from the current thread
+  const draft = useMutation({
+    mutationFn: () => api.aiDraft(requestId),
+    onSuccess: (res) => {
+      if (res.draft) {
+        setText(res.draft.body);
+        setFromDraft(true);
+        inputRef.current?.focus();
+      }
+    },
   });
-
-  useEffect(() => {
-    if (draftWanted && draft?.draft && !text) {
-      setText(draft.draft.body);
-      setFromDraft(true);
-      inputRef.current?.focus();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, draftWanted]);
 
   const send = useMutation({
     mutationFn: () =>
@@ -421,14 +429,14 @@ function Composer({ requestId, supporter }: { requestId: string; supporter?: boo
       <div className="mx-auto max-w-2xl">
         {supporter && (
           <div className="mb-2 flex items-center gap-2 px-1">
-            <Chip onClick={() => setDraftWanted(true)} className="!bg-mint !text-primary">
-              <IconSparkle size={14} /> {draftLoading ? "Drafting…" : draft?.draft ? "AI draft ready" : "AI draft"}
+            <Chip onClick={() => !draft.isPending && draft.mutate()} className="!bg-mint !text-primary">
+              <IconSparkle size={14} /> {draft.isPending ? "Drafting…" : fromDraft ? "Redraft" : "AI draft"}
             </Chip>
             <Chip onClick={() => setNote((n) => !n)} active={note}>
               Internal note
             </Chip>
-            {fromDraft && draft?.draft?.groundedIn.articleTitle && (
-              <span className="text-[12px] text-ink-secondary">grounded in {draft.draft.groundedIn.articleTitle}</span>
+            {fromDraft && draft.data?.draft?.groundedIn.articleTitle && (
+              <span className="text-[12px] text-ink-secondary">grounded in {draft.data.draft.groundedIn.articleTitle}</span>
             )}
           </div>
         )}
@@ -457,14 +465,14 @@ function Composer({ requestId, supporter }: { requestId: string; supporter?: boo
           />
           <button
             onClick={() => fileRef.current?.click()}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-chip text-ink-secondary cursor-pointer"
+            className="glass flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink-secondary cursor-pointer hover:bg-white/65"
             aria-label="Attach"
           >
             <IconPaperclip size={18} />
           </button>
           <button
             onClick={() => void toggleVoice()}
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full cursor-pointer ${recorder.recording ? "bg-danger text-white" : "bg-chip text-ink-secondary"}`}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full cursor-pointer ${recorder.recording ? "bg-danger text-white" : "glass text-ink-secondary hover:bg-white/65"}`}
             aria-label="Voice"
           >
             <IconMic size={18} />

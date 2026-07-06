@@ -9,6 +9,8 @@ export const QUEUES = {
   mergeScan: "merge-scan",
   freshnessScan: "freshness-scan",
   autoAnswer: "auto-answer",
+  autoCloseScan: "auto-close-scan",
+  autoTag: "auto-tag",
 } as const;
 
 export type EmbedJob = {

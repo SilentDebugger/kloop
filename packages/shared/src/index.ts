@@ -1,3 +1,4 @@
 export * from "./types.js";
 export * from "./tokens.js";
 export * from "./client.js";
+export * from "./format.js";

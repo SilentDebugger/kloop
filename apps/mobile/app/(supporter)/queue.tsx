@@ -10,7 +10,12 @@ import { timeAgo } from "../../src/format";
 import { useActiveWorkspace } from "../../src/store/connection";
 import { Avatar, Button, Card, Chip, EmptyState, PageTitle, Segmented, Spinner } from "../../src/ui";
 
-type Scope = "unassigned" | "mine" | "all";
+type Scope = "unassigned" | "mine" | "ai" | "all";
+
+/** Open requests the AI is currently handling (answered, unclaimed, awaiting the user). */
+function isAiHandled(r: RequestSummary): boolean {
+  return r.autoAnswered && !r.claimedBy && r.status !== "solved";
+}
 
 /** Queue — filters, claim, unread; the supporter home. */
 export default function QueueScreen() {
@@ -27,9 +32,11 @@ export default function QueueScreen() {
 
   const all = data?.requests ?? [];
   const open = all.filter((r) => r.status !== "solved");
-  const unassigned = open.filter((r) => !r.claimedBy);
+  // AI-handled requests get their own segment so "Unassigned" means "needs a human"
+  const ai = open.filter(isAiHandled);
+  const unassigned = open.filter((r) => !r.claimedBy && !isAiHandled(r));
   const mine = open.filter((r) => r.claimedBy === ws?.user?.id);
-  const scoped = scope === "unassigned" ? unassigned : scope === "mine" ? mine : all;
+  const scoped = scope === "unassigned" ? unassigned : scope === "mine" ? mine : scope === "ai" ? ai : all;
   const rows = tag ? scoped.filter((r) => r.tags.includes(tag)) : scoped;
   const allTags = [...new Set(open.flatMap((r) => r.tags))].slice(0, 10);
 
@@ -62,6 +69,7 @@ export default function QueueScreen() {
             options={[
               { value: "unassigned", label: `Unassigned · ${unassigned.length}` },
               { value: "mine", label: `Mine · ${mine.length}` },
+              { value: "ai", label: `✦ AI · ${ai.length}` },
               { value: "all", label: "All" },
             ]}
           />
@@ -78,7 +86,10 @@ export default function QueueScreen() {
         {isLoading ? (
           <Spinner />
         ) : rows.length === 0 ? (
-          <EmptyState title="Queue is clear" hint="No requests to handle right now." />
+          <EmptyState
+            title={scope === "ai" ? "AI has nothing in flight" : "Queue is clear"}
+            hint={scope === "ai" ? "Auto-answered requests awaiting the user will show here." : "No requests to handle right now."}
+          />
         ) : (
           <View style={{ gap: 10 }}>
             {rows.map((r) => (
@@ -127,9 +138,14 @@ function QueueCard({ r }: { r: RequestSummary }) {
             <Text style={{ fontSize: 12, color: colors.textSecondary, fontWeight: "500" }}>{tg}</Text>
           </View>
         ))}
-        {r.escalated && (
+        {isAiHandled(r) && r.confirmationState === "pending" && (
           <View style={{ backgroundColor: colors.mint, borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 }}>
-            <Text style={{ fontSize: 12, color: colors.primary, fontWeight: "600" }}>Escalated</Text>
+            <Text style={{ fontSize: 12, color: colors.primary, fontWeight: "600" }}>✦ Auto-answered</Text>
+          </View>
+        )}
+        {r.escalated && (
+          <View style={{ backgroundColor: colors.amberSoft, borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 }}>
+            <Text style={{ fontSize: 12, color: colors.amber, fontWeight: "600" }}>Escalated</Text>
           </View>
         )}
         <View style={{ flex: 1 }} />

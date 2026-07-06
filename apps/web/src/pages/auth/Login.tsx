@@ -5,14 +5,14 @@ import { useTranslation } from "react-i18next";
 import { ApiError } from "@kloop/shared";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { Button, ErrorNote, Input, Spinner } from "../../ui";
+import { Button, ErrorNote, ErrorState, Input, Spinner } from "../../ui";
 
 export function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const setSession = useAuth((s) => s.setSession);
 
-  const { data, isLoading } = useQuery({ queryKey: ["auth-methods"], queryFn: () => api.authMethods() });
+  const { data, isLoading, error: methodsError, refetch } = useQuery({ queryKey: ["auth-methods"], queryFn: () => api.authMethods() });
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,6 +21,13 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  if (methodsError && !data) {
+    return (
+      <div className="flex min-h-full items-center justify-center">
+        <ErrorState message="Can't reach the server." onRetry={() => void refetch()} />
+      </div>
+    );
+  }
   if (isLoading || !data) {
     return (
       <div className="flex min-h-full items-center justify-center">

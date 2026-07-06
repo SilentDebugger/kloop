@@ -143,6 +143,7 @@ requestRoutes.post("/", async (c) => {
   }
 
   await enqueueEmbed("request", request.id);
+  await enqueue(QUEUES.autoTag, { requestId: request.id });
   await recordEvent(org.id, "user", user.id, "request_created", {
     requestId: request.id,
     ref: `REQ-${refNumber}`,
@@ -347,6 +348,24 @@ requestRoutes.get("/:id", async (c) => {
         .where(and(eq(tables.requests.orgId, org.id), eq(tables.requests.authorId, request.authorId)))
     : [{ n: 1 }];
 
+  // supporter-only observability: the latest reason the AI declined to auto-answer
+  let autoAnswerSkip: Record<string, unknown> | null = null;
+  if (isSupporter && !request.autoAnswered) {
+    const [skipEvent] = await db
+      .select({ payload: tables.events.payload, createdAt: tables.events.createdAt })
+      .from(tables.events)
+      .where(
+        and(
+          eq(tables.events.orgId, org.id),
+          eq(tables.events.type, "auto_answer_skipped"),
+          sql`${tables.events.payload}->>'requestId' = ${request.id}`,
+        ),
+      )
+      .orderBy(desc(tables.events.createdAt))
+      .limit(1);
+    if (skipEvent) autoAnswerSkip = { ...skipEvent.payload, createdAt: skipEvent.createdAt };
+  }
+
   return c.json({
     request: {
       ...requestSummary(request),
@@ -385,6 +404,7 @@ requestRoutes.get("/:id", async (c) => {
             .map((a) => ({ id: a.id, filename: a.filename, mimeType: a.mimeType, kind: a.kind })),
         }))
       : [],
+    ...(autoAnswerSkip ? { autoAnswerSkip } : {}),
   });
 });
 

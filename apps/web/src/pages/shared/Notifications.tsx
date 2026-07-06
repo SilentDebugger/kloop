@@ -3,13 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
-import { Button, Card, EmptyState, Spinner } from "../../ui";
+import { Button, Card, EmptyState, ErrorState, Spinner } from "../../ui";
 import { IconBell } from "../../ui/icons";
 
 export function NotificationsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({ queryKey: ["notifications"], queryFn: () => api.notifications() });
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ["notifications"], queryFn: () => api.notifications() });
 
   const markAll = useMutation({
     mutationFn: () => api.markAllNotificationsRead(),
@@ -36,7 +36,9 @@ export function NotificationsPage() {
           ) : undefined
         }
       />
-      {isLoading ? (
+      {error && !data ? (
+        <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />
+      ) : isLoading ? (
         <div className="flex justify-center pt-16">
           <Spinner size={26} />
         </div>

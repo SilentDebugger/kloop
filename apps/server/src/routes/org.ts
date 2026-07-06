@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, tables } from "../db/index.js";
 import { requireAuth, requireRole } from "../http/middleware.js";
 import { orgSettings, type AppEnv } from "../http/context.js";
@@ -49,6 +49,7 @@ orgRoutes.patch("/", requireRole("admin"), async (c) => {
           emailInEnabled: z.boolean().optional(),
           reopenGraceDays: z.number().int().min(0).max(90).optional(),
           autoAnswerConfidence: z.number().min(0.5).max(1).optional(),
+          onboardingDismissed: z.boolean().optional(),
         })
         .optional(),
     })
@@ -67,6 +68,46 @@ orgRoutes.patch("/", requireRole("admin"), async (c) => {
   const [updated] = await db.update(tables.orgs).set(patch).where(eq(tables.orgs.id, org.id)).returning();
   await recordEvent(org.id, "user", c.get("user").id, "org_settings_updated", { fields: Object.keys(body) });
   return c.json({ org: { ...updated, settings: orgSettings(updated) } });
+});
+
+/**
+ * Onboarding checklist for new orgs (admin-only). Every step is derived from
+ * live data, so it self-completes as the org gets set up — nothing to store
+ * except the dismissed flag in org settings.
+ */
+orgRoutes.get("/onboarding", requireRole("admin"), async (c) => {
+  const org = c.get("org");
+  const s = orgSettings(org);
+
+  const [teammates] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(tables.users)
+    .where(and(eq(tables.users.orgId, org.id), isNull(tables.users.deactivatedAt)));
+  const [pendingInvites] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(tables.invitations)
+    .where(and(eq(tables.invitations.orgId, org.id), isNull(tables.invitations.acceptedAt)));
+  const [published] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(tables.articles)
+    .where(and(eq(tables.articles.orgId, org.id), eq(tables.articles.status, "published")));
+  const [requests] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(tables.requests)
+    .where(eq(tables.requests.orgId, org.id));
+
+  // "chosen" means the admin actually saved a tier, not that the default applies
+  const tierChosen = "automationTier" in ((org.settings ?? {}) as Record<string, unknown>);
+  const mailConfigured = config.SMTP_HOST !== "localhost" || Boolean(config.SMTP_USER);
+
+  const steps = [
+    { id: "invite_team", done: (teammates?.n ?? 0) > 1 || (pendingInvites?.n ?? 0) > 0 },
+    { id: "choose_tier", done: tierChosen },
+    { id: "publish_article", done: (published?.n ?? 0) > 0 },
+    { id: "first_request", done: (requests?.n ?? 0) > 0 },
+    { id: "connect_email", done: s.emailInEnabled || mailConfigured },
+  ];
+  return c.json({ steps, dismissed: s.onboardingDismissed, complete: steps.every((st) => st.done) });
 });
 
 /**

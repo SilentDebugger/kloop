@@ -198,7 +198,7 @@ export function IntegrationsPage() {
                 <button
                   key={ev}
                   onClick={() => setHookEvents(on ? hookEvents.filter((e) => e !== ev) : [...hookEvents, ev])}
-                  className={`rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors cursor-pointer ${on ? "bg-ink text-white" : "bg-chip text-ink"}`}
+                  className={`rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors cursor-pointer ${on ? "glass-dark text-white" : "glass text-ink hover:bg-white/65"}`}
                 >
                   {ev}
                 </button>

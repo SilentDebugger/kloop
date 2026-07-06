@@ -7,7 +7,7 @@ import { colors } from "@kloop/shared";
 import { api } from "../src/api";
 import { timeAgo } from "../src/format";
 import { useComposerAttachments } from "../src/uploads";
-import { Card, Chip, EmptyState, Input, PageTitle, Spinner } from "../src/ui";
+import { Card, Chip, EmptyState, GlassSurface, Input, PageTitle, Spinner } from "../src/ui";
 import { AttachChips, AttachmentTray } from "../src/ui/attachments";
 
 /**
@@ -47,8 +47,10 @@ export default function KbScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 8, paddingBottom: 12 }}>
-          <Pressable onPress={() => router.back()} style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }}>
-            <Text style={{ fontSize: 18, color: colors.text }}>‹</Text>
+          <Pressable onPress={() => router.back()}>
+            <GlassSurface interactive fallbackColor={colors.card} style={{ width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ fontSize: 18, color: colors.text }}>‹</Text>
+            </GlassSurface>
           </Pressable>
           <PageTitle>Knowledge base</PageTitle>
         </View>
@@ -57,7 +59,7 @@ export default function KbScreen() {
         <View style={{ marginTop: 10, gap: 10 }}>
           <AttachmentTray items={att.attachments} onRemove={att.remove} />
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <AttachChips recording={att.recording} attach={att.attach} camera={false} />
+            <AttachChips recording={att.recording} attach={att.attach} error={att.error} onDismissError={att.dismissError} camera={false} />
           </View>
         </View>
 

@@ -5,7 +5,7 @@ import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
-import { Avatar, Button, Card, ErrorNote, Input, SectionLabel, Segmented, Sheet, Spinner } from "../../ui";
+import { Avatar, Button, Card, ErrorNote, ErrorState, Input, SectionLabel, Segmented, Sheet, Spinner } from "../../ui";
 import { IconCheck, IconDots, IconPlus } from "../../ui/icons";
 
 const ROLES = ["requester", "supporter", "admin"] as const;
@@ -23,7 +23,7 @@ export function UsersPage() {
   const me = useAuth((s) => s.user);
   const [addOpen, setAddOpen] = useState(false);
 
-  const { data: usersData, isLoading } = useQuery({ queryKey: ["org-users"], queryFn: () => api.orgUsers() });
+  const { data: usersData, isLoading, error, refetch } = useQuery({ queryKey: ["org-users"], queryFn: () => api.orgUsers() });
   const { data: invData } = useQuery({ queryKey: ["invitations"], queryFn: () => api.invitations() });
 
   const invalidate = () => {
@@ -37,6 +37,7 @@ export function UsersPage() {
   });
   const revoke = useMutation({ mutationFn: (id: string) => api.revokeInvitation(id), onSuccess: invalidate });
 
+  if (error && !usersData) return <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />;
   if (isLoading) {
     return (
       <div className="flex justify-center pt-24">
@@ -159,7 +160,7 @@ function RowMenu({ items }: { items: MenuItem[] }) {
         <IconDots size={17} />
       </button>
       {open && (
-        <div className="fade-up absolute right-0 top-9 z-30 w-44 rounded-inner border border-line bg-card py-1.5 shadow-float">
+        <div className="glass-strong fade-up absolute right-0 top-9 z-30 w-44 rounded-inner py-1.5">
           {items.map((it) => (
             <div key={it.label}>
               {it.separator && <div className="my-1.5 border-t border-line" />}
@@ -249,7 +250,7 @@ function AddPersonSheet({ open, onClose, onDone }: { open: boolean; onClose: () 
               key={r}
               onClick={() => setRole(r)}
               className={`flex-1 rounded-full px-3 py-2 text-[13px] font-semibold capitalize transition-colors cursor-pointer ${
-                role === r ? "bg-ink text-white" : "bg-chip text-ink"
+                role === r ? "glass-dark text-white" : "glass text-ink hover:bg-white/65"
               }`}
             >
               {r}

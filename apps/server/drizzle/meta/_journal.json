@@ -29,6 +29,13 @@
       "when": 1783237793894,
       "tag": "0003_chat_search",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783335393074,
+      "tag": "0004_chief_malcolm_colcord",
+      "breakpoints": true
     }
   ]
 }

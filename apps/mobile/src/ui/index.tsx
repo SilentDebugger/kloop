@@ -12,6 +12,9 @@ import {
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { colors, radii } from "@kloop/shared";
+import { GlassSurface } from "./glass";
+
+export { GlassSurface, liquidGlass } from "./glass";
 
 /* ------------------------------------------------------------------ */
 /* Logo — the ring mark                                                */
@@ -49,11 +52,40 @@ export function Button({
   style?: StyleProp<ViewStyle>;
   icon?: ReactNode;
 }) {
-  const bg =
-    variant === "primary" ? colors.primary : variant === "secondary" ? colors.chip : variant === "mint" ? colors.mint : colors.card;
   const fg =
     variant === "primary" ? colors.onPrimary : variant === "danger" ? colors.danger : variant === "mint" ? colors.primary : colors.text;
   const pad = size === "sm" ? { paddingVertical: 7, paddingHorizontal: 14 } : size === "lg" ? { paddingVertical: 14, paddingHorizontal: 20 } : { paddingVertical: 11, paddingHorizontal: 18 };
+  const inner = (
+    <>
+      {loading ? <ActivityIndicator size="small" color={fg} /> : icon}
+      <Text numberOfLines={1} style={{ color: fg, fontWeight: "600", fontSize: size === "sm" ? 13 : 15 }}>{title}</Text>
+    </>
+  );
+  const shape: ViewStyle = {
+    borderRadius: radii.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+    ...pad,
+  };
+
+  // secondary/outline have no meaningful background of their own — Liquid Glass
+  if (variant === "secondary" || variant === "outline") {
+    return (
+      <Pressable
+        onPress={onPress}
+        disabled={disabled || loading}
+        style={({ pressed }) => [{ borderRadius: radii.pill, opacity: disabled ? 0.5 : pressed ? 0.85 : 1 }, style]}
+      >
+        <GlassSurface interactive fallbackColor={variant === "secondary" ? colors.chip : colors.card} style={shape}>
+          {inner}
+        </GlassSurface>
+      </Pressable>
+    );
+  }
+
+  const bg = variant === "primary" ? colors.primary : variant === "mint" ? colors.mint : colors.card;
   return (
     <Pressable
       onPress={onPress}
@@ -61,20 +93,14 @@ export function Button({
       style={({ pressed }) => [
         {
           backgroundColor: bg,
-          borderRadius: radii.pill,
-          alignItems: "center",
-          justifyContent: "center",
-          flexDirection: "row",
-          gap: 8,
+          ...shape,
           opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
-          ...(variant === "outline" || variant === "danger" ? { borderWidth: 1, borderColor: colors.border } : {}),
-          ...pad,
+          ...(variant === "danger" ? { borderWidth: 1, borderColor: colors.border } : {}),
         },
         style,
       ]}
     >
-      {loading ? <ActivityIndicator size="small" color={fg} /> : icon}
-      <Text numberOfLines={1} style={{ color: fg, fontWeight: "600", fontSize: size === "sm" ? 13 : 15 }}>{title}</Text>
+      {inner}
     </Pressable>
   );
 }
@@ -122,22 +148,26 @@ export function Chip({
     <Pressable
       onPress={onPress}
       disabled={!onPress}
-      style={({ pressed }) => [
-        {
-          backgroundColor: active ? colors.text : colors.chip,
+      style={({ pressed }) => [{ borderRadius: radii.pill, opacity: pressed ? 0.85 : 1 }, style]}
+    >
+      <GlassSurface
+        interactive={!!onPress}
+        fallbackColor={colors.chip}
+        tintColor={active ? colors.text : undefined}
+        style={{
           borderRadius: radii.pill,
           paddingVertical: 7,
           paddingHorizontal: 14,
           flexDirection: "row",
           alignItems: "center",
+          justifyContent: "center",
           gap: 6,
-          opacity: pressed ? 0.85 : 1,
-        },
-        style,
-      ]}
-    >
-      {icon}
-      <Text style={{ color: active ? "#fff" : colors.text, fontSize: 13, fontWeight: "500" }}>{label}</Text>
+          flexGrow: 1,
+        }}
+      >
+        {icon}
+        <Text style={{ color: active ? "#fff" : colors.text, fontSize: 13, fontWeight: "500" }}>{label}</Text>
+      </GlassSurface>
     </Pressable>
   );
 }
@@ -273,7 +303,10 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <View style={{ flexDirection: "row", backgroundColor: colors.chip, borderRadius: radii.pill, padding: 4, gap: 4, alignSelf: "flex-start" }}>
+    <GlassSurface
+      fallbackColor={colors.chip}
+      style={{ flexDirection: "row", borderRadius: radii.pill, padding: 4, gap: 4, alignSelf: "flex-start" }}
+    >
       {options.map((o) => (
         <Pressable
           key={o.value}
@@ -288,7 +321,7 @@ export function Segmented<T extends string>({
           <Text style={{ fontSize: 13, fontWeight: "600", color: o.value === value ? colors.text : colors.textSecondary }}>{o.label}</Text>
         </Pressable>
       ))}
-    </View>
+    </GlassSurface>
   );
 }
 

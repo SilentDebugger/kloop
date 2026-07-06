@@ -4,15 +4,16 @@ import { useTranslation } from "react-i18next";
 import { api } from "../../lib/api";
 import { timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
-import { Button, Card, EmptyState, SectionLabel, Spinner } from "../../ui";
+import { Button, Card, EmptyState, ErrorState, SectionLabel, Spinner } from "../../ui";
 import { IconSparkle } from "../../ui/icons";
 
 /** Gaps & health — clusters without articles, and stale docs to refresh. */
 export function GapsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { data, isLoading } = useQuery({ queryKey: ["gaps"], queryFn: () => api.gaps() });
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ["gaps"], queryFn: () => api.gaps() });
 
+  if (error && !data) return <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />;
   if (isLoading || !data) {
     return (
       <div className="flex justify-center pt-24">

@@ -200,12 +200,26 @@ export async function scanForMergeCandidates(orgId: string): Promise<number> {
       candidateId = candidate.id;
     }
 
-    // crosslink verdicts don't rewrite knowledge — surface as suppressed info, no LLM cost
+    // crosslink verdicts don't rewrite knowledge — create a "See also" link
+    // between the two articles (no human review, no LLM cost)
     if (verdict === "crosslink") {
       await db
         .update(tables.mergeCandidates)
         .set({ status: "suppressed" })
         .where(eq(tables.mergeCandidates.id, candidateId));
+      // canonical order (aId < bId from the scan query) keeps the pair unique
+      const [link] = await db
+        .insert(tables.articleLinks)
+        .values({ orgId, articleAId: aId, articleBId: bId, source: "crosslink" })
+        .onConflictDoNothing()
+        .returning();
+      if (link) {
+        await recordEvent(orgId, "ai", null, "articles_crosslinked", {
+          articleAId: aId,
+          articleBId: bId,
+          compositeScore: composite,
+        });
+      }
       continue;
     }
 

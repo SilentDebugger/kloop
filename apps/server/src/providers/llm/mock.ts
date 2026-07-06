@@ -26,6 +26,8 @@ export class MockLlmProvider implements LlmProvider {
         return JSON.stringify(this.clusterLabel(opts.data ?? {}));
       case "auto_answer":
         return JSON.stringify(this.autoAnswer(opts.data ?? {}));
+      case "auto_tag":
+        return JSON.stringify(this.autoTag(opts.data ?? {}));
       default:
         return opts.json ? "{}" : "ok";
     }
@@ -176,6 +178,18 @@ export class MockLlmProvider implements LlmProvider {
         if (w.length > 2 && !stop.has(w)) freq.set(w, (freq.get(w) ?? 0) + 1);
     const top = [...freq.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([w]) => w);
     return { label: top.join(" ") || "untitled cluster" };
+  }
+
+  private autoTag(data: Record<string, unknown>): unknown {
+    const text = `${String(data.title ?? "")} ${String(data.body ?? "")}`.toLowerCase();
+    const vocabulary = (data.vocabulary as string[] | undefined) ?? [];
+    // prefer existing vocabulary tags that literally appear in the text
+    const matched = vocabulary.filter((t) => t && text.includes(t.toLowerCase())).slice(0, 3);
+    if (matched.length > 0) return { tags: matched };
+    // otherwise fall back to the most frequent keyword, like cluster labels
+    const label = this.clusterLabel({ titles: [String(data.title ?? "")] }) as { label: string };
+    const word = label.label.split(" ")[0];
+    return { tags: word && word !== "untitled" ? [word] : [] };
   }
 
   private autoAnswer(data: Record<string, unknown>): unknown {

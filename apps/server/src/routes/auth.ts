@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { db, tables } from "../db/index.js";
 import { generateToken, hashToken, verifyPassword, hashPassword } from "../lib/crypto.js";
 import { sendMail } from "../lib/mail.js";
@@ -195,7 +195,16 @@ authRoutes.patch("/profile", requireAuth(), async (c) => {
   if (body.name) patch.name = body.name;
   if (body.language) patch.language = body.language;
   if (body.notificationPrefs) {
-    patch.notificationPrefs = { ...(user.notificationPrefs as Record<string, boolean>), ...body.notificationPrefs };
+    const merged = { ...(user.notificationPrefs as Record<string, boolean>), ...body.notificationPrefs };
+    // heal legacy snake_case keys older clients saved (notify.ts reads camelCase)
+    const legacy: Record<string, string> = { status_changes: "statusChanges", review_items: "reviewItems" };
+    for (const [oldKey, newKey] of Object.entries(legacy)) {
+      if (oldKey in merged) {
+        merged[newKey] = merged[newKey] ?? merged[oldKey];
+        delete merged[oldKey];
+      }
+    }
+    patch.notificationPrefs = merged;
   }
   if (body.password) patch.passwordHash = await hashPassword(body.password);
 
@@ -203,13 +212,27 @@ authRoutes.patch("/profile", requireAuth(), async (c) => {
   return c.json({ user: publicUser(updated) });
 });
 
-/** Register a push token (mobile). */
+/** Register a push token (mobile). A device token follows its current user. */
 authRoutes.post("/push-token", requireAuth(), async (c) => {
   const user = c.get("user");
   const body = z.object({ token: z.string(), platform: z.string().default("expo") }).parse(await c.req.json());
+  // the device changed hands (workspace switch / different login) — move the token
+  await db
+    .delete(tables.pushTokens)
+    .where(and(eq(tables.pushTokens.token, body.token), ne(tables.pushTokens.userId, user.id)));
   await db
     .insert(tables.pushTokens)
     .values({ userId: user.id, token: body.token, platform: body.platform })
     .onConflictDoNothing();
+  return c.json({ ok: true });
+});
+
+/** Forget a push token (called on sign-out so the device stops receiving pushes). */
+authRoutes.delete("/push-token", requireAuth(), async (c) => {
+  const user = c.get("user");
+  const body = z.object({ token: z.string() }).parse(await c.req.json());
+  await db
+    .delete(tables.pushTokens)
+    .where(and(eq(tables.pushTokens.userId, user.id), eq(tables.pushTokens.token, body.token)));
   return c.json({ ok: true });
 });

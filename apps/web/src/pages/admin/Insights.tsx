@@ -3,17 +3,18 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { api } from "../../lib/api";
 import { PageHeader } from "../../shell/AppShell";
-import { Card, SectionLabel, Segmented, Spinner } from "../../ui";
+import { Card, ErrorState, SectionLabel, Segmented, Spinner } from "../../ui";
 
 /** Admin insights: deflection, coverage, recurring issues, time saved. */
 export function InsightsPage() {
   const { t } = useTranslation();
   const [days, setDays] = useState<"7" | "30" | "90">("30");
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["insights", days],
     queryFn: () => api.insights(Number(days)),
   });
 
+  if (error && !data) return <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />;
   if (isLoading || !data) {
     return (
       <div className="flex justify-center pt-24">

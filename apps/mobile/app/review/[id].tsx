@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { colors, radii } from "@kloop/shared";
 import { api } from "../../src/api";
-import { Button, Card, SectionLabel, Spinner } from "../../src/ui";
+import { Button, Card, GlassSurface, SectionLabel, Spinner } from "../../src/ui";
 import { MarkdownLite } from "../../src/ui/MarkdownLite";
 
 type BlockShape = { id?: string; kind: string; conditionText: string | null; contentMd: string };
@@ -55,11 +55,10 @@ export default function ReviewDetailScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 140 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 8, paddingBottom: 10 }}>
-          <Pressable
-            onPress={() => router.back()}
-            style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }}
-          >
-            <Text style={{ fontSize: 18, color: colors.text }}>‹</Text>
+          <Pressable onPress={() => router.back()}>
+            <GlassSurface interactive fallbackColor={colors.card} style={{ width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ fontSize: 18, color: colors.text }}>‹</Text>
+            </GlassSurface>
           </Pressable>
           <View>
             <Text style={{ fontWeight: "700", fontSize: 15, color: colors.text }}>

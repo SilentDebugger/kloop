@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { db, tables } from "../db/index.js";
 import { requireAuth, requireRole } from "../http/middleware.js";
 import type { AppEnv } from "../http/context.js";
@@ -129,6 +129,31 @@ articleRoutes.get("/:id", async (c) => {
     .orderBy(tables.attachments.createdAt);
   const attachments = attachmentRows.map((a) => ({ id: a.id, filename: a.filename, mimeType: a.mimeType, kind: a.kind }));
 
+  // "See also" crosslinks (stored once per pair, rendered bidirectionally)
+  const linkRows = await db
+    .select()
+    .from(tables.articleLinks)
+    .where(
+      and(
+        eq(tables.articleLinks.orgId, org.id),
+        or(eq(tables.articleLinks.articleAId, view.article.id), eq(tables.articleLinks.articleBId, view.article.id)),
+      ),
+    );
+  const otherIds = linkRows.map((l) => (l.articleAId === view.article.id ? l.articleBId : l.articleAId));
+  let related: { id: string; kb: string; title: string }[] = [];
+  if (otherIds.length > 0) {
+    const others = await db
+      .select({
+        id: tables.articles.id,
+        kbNumber: tables.articles.kbNumber,
+        title: tables.articleRevisions.title,
+      })
+      .from(tables.articles)
+      .innerJoin(tables.articleRevisions, eq(tables.articleRevisions.id, tables.articles.currentRevisionId))
+      .where(and(inArray(tables.articles.id, otherIds), eq(tables.articles.status, "published")));
+    related = others.map((a) => ({ id: a.id, kb: `KB-${String(a.kbNumber).padStart(3, "0")}`, title: a.title }));
+  }
+
   // view count + learning signal (fire and forget)
   db.update(tables.articles)
     .set({ viewCount: sql`${tables.articles.viewCount} + 1` })
@@ -169,7 +194,7 @@ articleRoutes.get("/:id", async (c) => {
     }));
   }
 
-  return c.json({ ...view, attachments, provenance });
+  return c.json({ ...view, attachments, related, provenance });
 });
 
 /** Markdown export — docs are plain markdown, git-syncable, no lock-in. */

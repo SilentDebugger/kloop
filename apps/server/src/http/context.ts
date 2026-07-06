@@ -20,6 +20,7 @@ export type OrgSettings = {
   emailInEnabled: boolean;
   reopenGraceDays: number;
   autoAnswerConfidence: number;
+  onboardingDismissed: boolean;
 };
 
 export function orgSettings(org: Org): OrgSettings {
@@ -32,5 +33,6 @@ export function orgSettings(org: Org): OrgSettings {
     emailInEnabled: s.emailInEnabled ?? false,
     reopenGraceDays: s.reopenGraceDays ?? 14,
     autoAnswerConfidence: s.autoAnswerConfidence ?? 0.82,
+    onboardingDismissed: s.onboardingDismissed ?? false,
   };
 }

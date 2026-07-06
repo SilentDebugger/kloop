@@ -168,7 +168,7 @@ export function OrgSettingsPage() {
             <select
               value={overrideTier}
               onChange={(e) => setOverrideTier(Number(e.target.value))}
-              className="rounded-inner border border-line bg-card px-3 py-2 text-[14px] outline-none cursor-pointer"
+              className="glass rounded-inner px-3 py-2 text-[14px] outline-none cursor-pointer"
             >
               {TIER_LABELS.map((tl) => (
                 <option key={tl.tier} value={tl.tier}>

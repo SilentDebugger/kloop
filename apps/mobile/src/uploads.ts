@@ -38,8 +38,10 @@ export function useComposerAttachments() {
   const voice = useVoiceNote();
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const attach = async (kind: "camera" | "photo" | "voice") => {
+    setError(null);
     try {
       if (kind === "voice") {
         if (voice.recording) {
@@ -60,8 +62,8 @@ export function useComposerAttachments() {
         const a = await uploadFile(picked);
         setAttachments((x) => [...x, { id: a.id, filename: a.filename, kind: a.kind, localUri: picked.uri }]);
       }
-    } catch {
-      /* upload failed — keep composing */
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed — try again.");
     } finally {
       setUploading(false);
     }
@@ -71,6 +73,8 @@ export function useComposerAttachments() {
     attachments,
     ids: attachments.map((a) => a.id),
     uploading,
+    error,
+    dismissError: () => setError(null),
     recording: voice.recording,
     attach,
     remove: (id: string) => setAttachments((x) => x.filter((y) => y.id !== id)),

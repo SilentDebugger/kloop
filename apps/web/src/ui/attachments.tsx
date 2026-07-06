@@ -14,17 +14,19 @@ export function useComposerAttachments() {
   const recorder = useVoiceRecorder();
   const [attachments, setAttachments] = useState<WebAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const addFile = async (blob: Blob, name: string) => {
     setUploading(true);
+    setError(null);
     try {
       const res = await api.upload({ blob, name });
       setAttachments((x) => [
         ...x,
         { id: res.attachment.id, filename: res.attachment.filename, kind: res.attachment.kind, previewUrl: URL.createObjectURL(blob) },
       ]);
-    } catch {
-      /* upload failed — keep composing */
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed — try again.");
     } finally {
       setUploading(false);
     }
@@ -35,7 +37,7 @@ export function useComposerAttachments() {
       const note = await recorder.stop();
       if (note) await addFile(note.blob, note.name);
     } else {
-      await recorder.start().catch(() => {});
+      await recorder.start().catch(() => setError("Microphone unavailable — check browser permissions."));
     }
   };
 
@@ -43,6 +45,8 @@ export function useComposerAttachments() {
     attachments,
     ids: attachments.map((a) => a.id),
     uploading,
+    error,
+    dismissError: () => setError(null),
     recording: recorder.recording,
     seconds: recorder.seconds,
     addFile,
@@ -73,14 +77,14 @@ export function MediaQueryBar({ att, accept = "image/*" }: { att: ReturnType<typ
       />
       <button
         onClick={() => fileRef.current?.click()}
-        className="inline-flex items-center gap-1.5 rounded-full bg-chip px-3.5 py-1.5 text-[13px] font-medium text-ink cursor-pointer"
+        className="glass inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium text-ink cursor-pointer hover:bg-white/65"
       >
         <IconPaperclip size={14} /> Photo
       </button>
       <button
         onClick={() => void att.toggleVoice()}
         className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium cursor-pointer ${
-          att.recording ? "bg-danger text-white" : "bg-chip text-ink"
+          att.recording ? "bg-danger text-white" : "glass text-ink hover:bg-white/65"
         }`}
       >
         <IconMic size={14} /> {att.recording ? `Stop · 0:${String(att.seconds % 60).padStart(2, "0")}` : "Voice"}
@@ -113,6 +117,15 @@ export function MediaQueryBar({ att, accept = "image/*" }: { att: ReturnType<typ
             </button>
           </span>
         ),
+      )}
+
+      {att.error && (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-danger/10 px-3 py-1 text-[12px] font-medium text-danger">
+          {att.error}
+          <button onClick={att.dismissError} aria-label="Dismiss" className="cursor-pointer">
+            <IconX size={13} />
+          </button>
+        </span>
       )}
     </div>
   );

@@ -107,7 +107,7 @@ export default function HomeScreen() {
             />
             <AttachmentTray items={att.attachments} onRemove={att.remove} />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <AttachChips recording={att.recording} attach={att.attach} />
+              <AttachChips recording={att.recording} attach={att.attach} error={att.error} onDismissError={att.dismissError} />
               <View style={{ flex: 1 }} />
               {/* same round submit as the chat composer — the chips need the width */}
               <Pressable

@@ -361,6 +361,28 @@ export const provenance = pgTable(
   (t) => [index("provenance_block_idx").on(t.articleBlockId)],
 );
 
+/**
+ * "See also" crosslinks between articles: different problems that share a fix.
+ * Created automatically by the merge scan's crosslink verdict (crosslinks
+ * don't rewrite knowledge, so no human review) — stored once per pair with
+ * articleAId < articleBId, rendered bidirectionally.
+ */
+export const articleLinks = pgTable(
+  "article_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    articleAId: uuid("article_a_id").notNull().references(() => articles.id, { onDelete: "cascade" }),
+    articleBId: uuid("article_b_id").notNull().references(() => articles.id, { onDelete: "cascade" }),
+    source: text("source").notNull().default("crosslink"), // crosslink (scan) | manual
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("article_links_pair_idx").on(t.articleAId, t.articleBId),
+    index("article_links_org_idx").on(t.orgId),
+  ],
+);
+
 export const mergeCandidates = pgTable(
   "merge_candidates",
   {

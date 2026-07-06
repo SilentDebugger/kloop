@@ -102,14 +102,14 @@ A third, thinner persona: **Manager/Insights** — deflection rate, knowledge co
 │  │  roles)    │ │  roles)    │ │                         │ │
 │  └─────┬──────┘ └─────┬──────┘ └───────────┬─────────────┘ │
 └────────┼──────────────┼────────────────────┼───────────────┘
-         │        HTTPS + WebSocket          │
+         │          HTTPS + SSE              │
          ▼              ▼                    ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  ONE SELF-HOSTED BACKEND (single container / binary)        │
 │  ┌──────────┐ ┌──────────────┐ ┌──────────────────────────┐│
-│  │ REST/    │ │ Auth (OIDC/  │ │ Background workers:      ││
-│  │ GraphQL  │ │ email magic  │ │ embedding, clustering,   ││
-│  │ API      │ │ link, SSO)   │ │ article gen, merge scan  ││
+│  │ REST API │ │ Auth (email  │ │ Background workers:      ││
+│  │ + SSE    │ │ magic link,  │ │ embedding, clustering,   ││
+│  │          │ │ password)    │ │ article gen, merge scan  ││
 │  └──────────┘ └──────────────┘ └──────────────────────────┘│
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │ LLM/Embedding provider abstraction                   │  │
@@ -145,7 +145,7 @@ A third, thinner persona: **Manager/Insights** — deflection rate, knowledge co
 
 - One deployable unit: **single Docker container** (or binary) containing API + background workers. Optional worker scale-out later, but `docker compose up` must be a complete production-capable install.
 - Suggested stack: **TypeScript (NestJS/Hono) or Go** for the API; job queue on Postgres (e.g. pg-boss / River) — *no Redis requirement* for the default install. Fewer moving parts = more OSS adoption.
-- Realtime via WebSocket/SSE for queue updates and "someone is typing/handling this".
+- Realtime via SSE for queue updates and live thread/badge refreshes.
 - Everything the UI can do is available via **REST API + webhooks** (integration-first).
 
 ---
@@ -183,9 +183,10 @@ Configuration is entirely env-driven (12-factor): `DATABASE_URL`, `STORAGE_*`, `
 | Request | title + body (one vector) | live deflection, precedent matching, clustering |
 | Resolution capture | full capture (one vector) | "same as last time" suggestions, article sourcing |
 | Article | **per-chunk** (symptoms, each step-group, notes) + one summary vector | retrieval, merge detection, contradiction detection |
-| Conversation messages | per message (supporter replies only) | mining undocumented answers |
+| Conversation messages | per message | mining undocumented answers, multimodal chat search |
 | Attachments | OCR/transcript text → embedded | photos of error screens, voice memos |
-| Tags/entities | label + description | auto-tagging, taxonomy emergence |
+
+Tags are plain labels (LLM auto-tagging on request creation + manual editing) — overlap is computed set-wise (`tagOverlap`), no separate tag vectors needed.
 
 ### How
 
@@ -198,7 +199,7 @@ Configuration is entirely env-driven (12-factor): `DATABASE_URL`, `STORAGE_*`, `
 
 1. **Deflection**: as the requester types (debounced), embed the draft → top-k article chunks + resolved requests → show suggestions
 2. **Supporter precedents**: on ticket open → nearest resolved requests with their resolutions
-3. **Clustering**: periodic incremental clustering (HDBSCAN or threshold-based agglomerative) over request vectors → problem clusters
+3. **Clustering**: threshold-based incremental clustering over request vectors — each new request joins its nearest cluster (or starts one) as it arrives; cheap, real-time, no periodic full re-cluster needed at helpdesk scale
 4. **Gap detection**: clusters with high mass but no linked article above a similarity threshold
 5. **Merge & contradiction detection**: article↔article and resolution↔article-chunk similarity (see next section)
 
@@ -237,7 +238,7 @@ A background job maintains an **article similarity graph**:
    - `sim_resolution` — similarity between resolution chunks
    - `cluster_overlap` — Jaccard overlap of the request clusters that feed them
    - `co_retrieval` — how often both articles appear in the same top-k search results (logged from real usage — the strongest practical duplicate signal)
-   - `entity_overlap` — shared tagged entities
+   - `entity_overlap` — Jaccard overlap of the two articles' tags
 3. Score above threshold → create a **MergeCandidate** record
 
 The four canonical outcomes, decided by the *shape* of the similarity:
@@ -341,7 +342,7 @@ Orgs slide automation up as trust builds — per tag/cluster, not only globally:
 | 0 | Suggestions only (docs shown to requester & supporter) |
 | 1 | AI drafts replies; supporter sends |
 | 2 | Auto-answer for high-confidence recurring issues; auto-escalate if user says "didn't help" |
-| 3 | Auto-answer + auto-close on user confirmation |
+| 3 | Tier 2 + auto-close: auto-answered requests that stay silent past the reopen-grace window are closed automatically (resolution stays untrusted — silence is a weak signal; the requester can still reopen) |
 
 Article **generation** proposals: always on. Article **publication & merging**: always human-approved (configurable trusted-author fast-path later, but that's the last thing to loosen).
 
@@ -397,7 +398,7 @@ What the wizard actually does under the hood — no magic:
 3. Creates the admin account and the org's discovery document (`/.well-known/kloop.json`) so mobile apps can connect immediately
 4. Runs a **health check** (API up, DB reachable, embeddings working, storage writable) and prints the URL + a QR code to connect the mobile app
 
-Re-running the wizard later (`kloop setup --reconfigure`) safely edits an existing install (e.g. switch from bundled Postgres to Supabase, change LLM provider).
+To change providers later (e.g. switch from bundled Postgres to Supabase, change LLM provider), edit the generated `.env` and restart the stack — every variable is documented inline.
 
 ### Path B — Clone & configure (for tinkerers and contributors)
 
@@ -415,8 +416,8 @@ docker compose exec api kloop migrate && kloop admin create
 
 ### Upgrades & operations
 
-- `kloop upgrade` (or `docker compose pull && up -d`) — migrations run automatically on boot, and are always backward-compatible one version back
-- `kloop backup` / `kloop restore` — one-command dump of DB + storage
+- Upgrades: `docker compose pull && docker compose up -d` — migrations run automatically on boot, and are always backward-compatible one version back
+- `kloop backup` / `kloop restore` — one-command dump of DB + local uploads into a single `.tar.gz` (with the s3 storage driver, back up the bucket with your provider's tooling)
 - `kloop doctor` — the same health check the wizard runs, for debugging any install
 - Versioned images (`kloop/server:1.x`), no `latest`-tag surprises
 

@@ -7,7 +7,7 @@ import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
-import { Card, Chip, EmptyState, SectionLabel, Spinner, StatusBadge } from "../../ui";
+import { Card, Chip, EmptyState, ErrorState, SectionLabel, Spinner, StatusBadge } from "../../ui";
 
 /** The requester a row belongs to (guests count too) — used for the person filter. */
 function requesterName(r: RequestSummary): string | null {
@@ -19,7 +19,7 @@ export function MyWorkPage() {
   const { t } = useTranslation();
   const user = useAuth((s) => s.user);
   const [person, setPerson] = useState<string | null>(null);
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["requests", "my-work"],
     queryFn: () => api.requests({ view: "queue" }),
   });
@@ -43,7 +43,9 @@ export function MyWorkPage() {
           ))}
         </div>
       )}
-      {isLoading ? (
+      {error && !data ? (
+        <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />
+      ) : isLoading ? (
         <div className="flex justify-center pt-16">
           <Spinner size={26} />
         </div>

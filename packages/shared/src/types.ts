@@ -66,11 +66,31 @@ export type ResolutionView = {
   attachments: AttachmentRef[];
 };
 
+/** Admin onboarding checklist: steps derive from live data, so they self-complete. */
+export type OnboardingStepId = "invite_team" | "choose_tier" | "publish_article" | "first_request" | "connect_email";
+
+export type OnboardingStatus = {
+  steps: { id: OnboardingStepId; done: boolean }[];
+  dismissed: boolean;
+  complete: boolean;
+};
+
+/** Supporter-only: why the AI declined to auto-answer this request. */
+export type AutoAnswerSkip = {
+  reason: "tag_tier_override" | "no_article_match" | "below_confidence" | "article_has_no_steps" | "generation_failed";
+  similarity?: number;
+  threshold?: number;
+  articleId?: string;
+  articleTitle?: string | null;
+  createdAt: string;
+};
+
 export type RequestDetail = {
   request: RequestSummary;
   messages: MessageView[];
   attachments: AttachmentRef[];
   resolutions: ResolutionView[];
+  autoAnswerSkip?: AutoAnswerSkip;
 };
 
 export type DeflectionSuggestion = {
@@ -139,6 +159,8 @@ export type ArticleView = {
   blocks: ArticleBlockView[];
   /** photos / voice notes attached to the doc — vectorized and searchable */
   attachments?: AttachmentRef[];
+  /** "See also" crosslinks (different problem, same fix) */
+  related?: { id: string; kb: string; title: string }[];
   provenance?: { blockId: string; sourceKind: string; sourceId: string; ref: string | null }[];
   redirectTo?: string;
 };

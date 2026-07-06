@@ -4,13 +4,15 @@ import { useRouter } from "expo-router";
 import { useMutation } from "@tanstack/react-query";
 import { colors } from "@kloop/shared";
 import { api } from "../api";
+import { unregisterPush } from "../push";
 import { useConnection } from "../store/connection";
 import { Avatar, Button, Card, PageTitle, SectionLabel } from "../ui";
 
+// keys must match PREF_BY_TYPE in apps/server/src/lib/notify.ts
 const NOTIFICATION_PREFS: { key: string; label: string; supporterOnly?: boolean }[] = [
   { key: "replies", label: "Replies" },
-  { key: "status_changes", label: "Status changes" },
-  { key: "review_items", label: "Review items", supporterOnly: true },
+  { key: "statusChanges", label: "Status changes" },
+  { key: "reviewItems", label: "Review items", supporterOnly: true },
 ];
 
 /** Settings — profile, notification toggles, workspaces, sign out. */
@@ -26,6 +28,7 @@ export function SettingsScreen() {
   });
 
   const signOut = async () => {
+    await unregisterPush(); // while the session is still valid
     await api.logout().catch(() => {});
     signOutActive();
     router.replace("/login");

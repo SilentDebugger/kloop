@@ -81,6 +81,9 @@ function AuthGate() {
   useEffect(() => {
     if (!hydrated) return;
     const inAuthFlow = segments[0] === "connect" || segments[0] === "login" || segments[0] === "qr-scan";
+    // deep-link targets (kloop://auth/verify, kloop://auth/invite) handle their
+    // own workspace bootstrap — never redirect away from them
+    if (segments[0] === "auth") return;
     if (!ws) {
       if (!inAuthFlow) router.replace("/connect");
       return;
