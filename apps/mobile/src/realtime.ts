@@ -5,7 +5,13 @@ import EventSource from "react-native-sse";
 import { api } from "./api";
 import { useActiveWorkspace } from "./store/connection";
 
-type StreamEvent = "request_created" | "request_updated" | "message_created" | "review_changed" | "notification";
+type StreamEvent =
+  | "request_created"
+  | "request_updated"
+  | "message_created"
+  | "review_changed"
+  | "ai_activity"
+  | "notification";
 
 /**
  * Mirrors the web app's SSE hook (apps/web/src/lib/sse.ts): one stream per
@@ -50,6 +56,11 @@ export function useRealtime(): void {
       if (data?.requestId) invalidate(["request", String(data.requestId)]);
     });
     es.addEventListener("review_changed", () => invalidate(["reviews"], ["review-counts"]));
+    es.addEventListener("ai_activity", (e) => {
+      const data = safeParse(e.data);
+      invalidate(["ai-activity"]);
+      if (data?.requestId) invalidate(["request", String(data.requestId)]);
+    });
     es.addEventListener("notification", () => invalidate(["notifications"]));
 
     // The stream is dead while the app is backgrounded — refetch everything

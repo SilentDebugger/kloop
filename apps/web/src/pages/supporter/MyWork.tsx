@@ -5,9 +5,9 @@ import { useTranslation } from "react-i18next";
 import type { RequestSummary } from "@kloop/shared";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { timeAgo } from "../../lib/format";
+import { dateLabel, timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
-import { Card, Chip, EmptyState, ErrorState, SectionLabel, Spinner, StatusBadge } from "../../ui";
+import { Card, Chip, Divider, EmptyState, ErrorState, GroupedCard, PastRow, ReplyPreview, SectionLabel, Spinner, StatusLine } from "../../ui";
 
 /** The requester a row belongs to (guests count too) — used for the person filter. */
 function requesterName(r: RequestSummary): string | null {
@@ -17,6 +17,7 @@ function requesterName(r: RequestSummary): string | null {
 /** My work — everything I've claimed, waiting on confirmation, recently solved. Filterable by person. */
 export function MyWorkPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const user = useAuth((s) => s.user);
   const [person, setPerson] = useState<string | null>(null);
   const { data, isLoading, error, refetch } = useQuery({
@@ -55,33 +56,64 @@ export function MyWorkPage() {
         <EmptyState title="Nothing for this person" hint="They have no requests in your claimed work." />
       ) : (
         <div className="flex flex-col gap-7 pb-8">
-          {active.length > 0 && <Group label={`Handling · ${active.length}`} rows={active} />}
-          {waiting.length > 0 && <Group label={`Waiting for confirmation · ${waiting.length}`} rows={waiting} />}
-          {solved.length > 0 && <Group label="Recently solved" rows={solved} />}
+          {active.length > 0 && <ActiveGroup label={`Handling · ${active.length}`} rows={active} />}
+          {waiting.length > 0 && <ActiveGroup label={`Waiting for confirmation · ${waiting.length}`} rows={waiting} waitingOnConfirmation />}
+          {solved.length > 0 && <PastGroup rows={solved} />}
         </div>
       )}
     </div>
   );
 }
 
-function Group({ label, rows }: { label: string; rows: RequestSummary[] }) {
+function ActiveGroup({ label, rows, waitingOnConfirmation }: { label: string; rows: RequestSummary[]; waitingOnConfirmation?: boolean }) {
   const navigate = useNavigate();
   return (
     <section>
       <SectionLabel className="mb-2.5 px-1">{label}</SectionLabel>
       <div className="flex flex-col gap-2.5">
-        {rows.map((r) => (
-          <Card key={r.id} as="button" onClick={() => navigate(`/requests/${r.id}`)} className="flex items-center gap-3 p-4">
-            <span className="min-w-0 flex-1">
-              <span className={`block leading-snug ${r.unreadForSupporter ? "font-bold" : "font-semibold"}`}>{r.title}</span>
-              <span className="mt-0.5 block text-[13px] text-ink-secondary">
-                {r.ref} · {requesterName(r) ?? ""} · {timeAgo(r.lastActivityAt)} ago
+        {rows.map((r) => {
+          const meta = waitingOnConfirmation ? "awaiting confirmation" : `updated ${timeAgo(r.lastActivityAt)} ago`;
+          return (
+            <Card key={r.id} as="button" onClick={() => navigate(`/requests/${r.id}`)} className="p-4">
+              <StatusLine status="handled" meta={meta} />
+              <span className={`mt-1.5 block text-[16px] leading-snug text-ink ${r.unreadForSupporter ? "font-extrabold" : "font-bold"}`}>
+                {r.title}
               </span>
-            </span>
-            <StatusBadge status={r.status} />
-          </Card>
-        ))}
+              <span className="mt-0.5 block text-[13px] text-ink-secondary">
+                {r.ref} · {requesterName(r) ?? ""}
+              </span>
+              {r.lastMessage && (
+                <ReplyPreview
+                  name={r.lastMessage.fromAi ? "kloop" : (r.lastMessage.authorName ?? "Reply")}
+                  body={r.lastMessage.body}
+                  unread={r.unreadForSupporter}
+                />
+              )}
+            </Card>
+          );
+        })}
       </div>
+    </section>
+  );
+}
+
+function PastGroup({ rows }: { rows: RequestSummary[] }) {
+  const navigate = useNavigate();
+  return (
+    <section>
+      <SectionLabel className="mb-2.5 px-1">Recently solved</SectionLabel>
+      <GroupedCard>
+        {rows.map((r, i) => (
+          <div key={r.id}>
+            {i > 0 && <Divider />}
+            <PastRow
+              title={r.title}
+              subtitle={`Solved ${dateLabel(r.solvedAt)} · ${requesterName(r) ?? ""}`}
+              onClick={() => navigate(`/requests/${r.id}`)}
+            />
+          </div>
+        ))}
+      </GroupedCard>
     </section>
   );
 }

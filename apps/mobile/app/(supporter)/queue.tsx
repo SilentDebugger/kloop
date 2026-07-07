@@ -8,7 +8,7 @@ import { colors, type RequestSummary } from "@kloop/shared";
 import { api } from "../../src/api";
 import { timeAgo } from "../../src/format";
 import { useActiveWorkspace } from "../../src/store/connection";
-import { Avatar, Button, Card, Chip, EmptyState, PageTitle, Segmented, Spinner } from "../../src/ui";
+import { Avatar, Button, Card, Chip, EmptyState, PageTitle, ReplyPreview, Segmented, Spinner, StatusLine } from "../../src/ui";
 
 type Scope = "unassigned" | "mine" | "ai" | "all";
 
@@ -113,24 +113,22 @@ function QueueCard({ r }: { r: RequestSummary }) {
     },
   });
 
-  const sub = [
-    r.author?.name ?? (r.guestName ? `${r.guestName} (guest)` : null),
+  const requesterName = r.author?.name ?? (r.guestName ? `${r.guestName} (guest)` : "Guest");
+  const meta = r.status === "handled" ? `updated ${timeAgo(r.lastActivityAt)} ago` : `received ${timeAgo(r.createdAt)} ago`;
+  const flags = [
     r.autoAnswered && r.escalated ? "auto-answer didn't help" : null,
     r.channel === "email" ? "via email-in" : null,
-    r.body ? `"${r.body.slice(0, 50)}${r.body.length > 50 ? "…" : ""}"` : null,
   ]
     .filter(Boolean)
     .join(" · ");
 
   return (
     <Card onPress={() => router.push(`/request/${r.id}`)} style={{ padding: 14, gap: 10 }}>
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        {r.unreadForSupporter && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary, marginTop: 6 }} />}
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontWeight: "700", fontSize: 15, color: colors.text, lineHeight: 20 }}>{r.title}</Text>
-          <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2, lineHeight: 18 }}>{sub}</Text>
-        </View>
-        <Text style={{ fontSize: 12, color: colors.textFaint }}>{timeAgo(r.createdAt)}</Text>
+      <View>
+        <StatusLine status={r.status === "handled" ? "handled" : "open"} meta={meta} />
+        <Text style={{ fontWeight: "700", fontSize: 16, color: colors.text, marginTop: 6, lineHeight: 21 }}>{r.title}</Text>
+        {flags ? <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>{flags}</Text> : null}
+        {r.body ? <ReplyPreview name={requesterName} body={r.body} unread={r.unreadForSupporter} /> : null}
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         {r.tags.slice(0, 3).map((tg) => (

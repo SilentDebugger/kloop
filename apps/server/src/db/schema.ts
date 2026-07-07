@@ -228,6 +228,13 @@ export const resolutions = pgTable(
     linkedResolutionId: uuid("linked_resolution_id"),
     /** set when this resolution has been distilled into an article */
     articleId: uuid("article_id"),
+    /**
+     * Documentation pipeline state — what the AI did with this capture:
+     * working | drafted | already_documented | covered_by_draft | skipped | failed
+     */
+    docState: text("doc_state").notNull().default("working"),
+    /** human-readable outcome ("Covered by KB-041 · VPN drops on hotel Wi-Fi") */
+    docNote: text("doc_note"),
     embedding: vector("embedding", { dimensions: EMBEDDING_DIM }),
     embeddingStatus: embeddingStatus(),
     searchText: tsvector("search_text").generatedAlwaysAs(

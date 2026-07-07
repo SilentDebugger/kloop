@@ -1,4 +1,4 @@
-import type { AutoAnswerSkip } from "./types.js";
+import type { AutoAnswerSkip, DocState } from "./types.js";
 
 const pct = (n?: number) => `${Math.round((n ?? 0) * 100)}%`;
 
@@ -15,5 +15,23 @@ export function autoAnswerSkipLabel(skip: AutoAnswerSkip): string {
       return "AI skipped auto-answer — a tag on this request caps automation below tier 2";
     case "generation_failed":
       return "AI skipped auto-answer — the reply couldn't be generated";
+  }
+}
+
+/** Short headline per documentation pipeline state — shared by the activity feed and thread. */
+export function docStateLabel(state: DocState): string {
+  switch (state) {
+    case "working":
+      return "Writing this up…";
+    case "drafted":
+      return "New draft ready for review";
+    case "already_documented":
+      return "Already documented";
+    case "covered_by_draft":
+      return "Covered by a pending draft";
+    case "skipped":
+      return "Nothing to document";
+    case "failed":
+      return "Couldn't finish";
   }
 }

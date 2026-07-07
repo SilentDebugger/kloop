@@ -4,15 +4,16 @@ import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { colors, type RequestSummary } from "@kloop/shared";
 import { api } from "../../src/api";
-import { sentLabel, timeAgo } from "../../src/format";
-import { Card, EmptyState, PageTitle, SectionLabel, Spinner, StatusBadge } from "../../src/ui";
+import { dateLabel, timeAgo } from "../../src/format";
+import { Card, Divider, EmptyState, GroupedCard, PageTitle, PastRow, ReplyPreview, SectionLabel, Spinner, StatusLine } from "../../src/ui";
 
-/** My requests — minimal status only, per the mockup. */
+/** My requests — status-first cards up top, quiet history below. */
 export default function MyRequestsScreen() {
   const { data, isLoading, refetch } = useQuery({ queryKey: ["requests", "mine"], queryFn: () => api.requests() });
 
   const open = (data?.requests ?? []).filter((r) => r.status !== "solved");
   const solved = (data?.requests ?? []).filter((r) => r.status === "solved");
+  const waiting = open.filter((r) => r.unreadForRequester).length;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
@@ -20,8 +21,14 @@ export default function MyRequestsScreen() {
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
         onScrollBeginDrag={() => void refetch()}
       >
-        <View style={{ paddingTop: 8, paddingBottom: 14 }}>
+        <View style={{ paddingTop: 8, paddingBottom: 16 }}>
           <PageTitle>My requests</PageTitle>
+          {open.length > 0 && (
+            <Text style={{ fontSize: 14, color: colors.textSecondary, marginTop: 3 }}>
+              {open.length} open
+              {waiting > 0 ? ` · ${waiting} repl${waiting > 1 ? "ies" : "y"} waiting for you` : ""}
+            </Text>
+          )}
         </View>
 
         {isLoading ? (
@@ -29,54 +36,60 @@ export default function MyRequestsScreen() {
         ) : open.length === 0 && solved.length === 0 ? (
           <EmptyState title="Nothing here yet" hint="When you ask for help, your requests and their status show up here." />
         ) : (
-          <View style={{ gap: 10 }}>
+          <>
             {open.length > 0 && (
-              <View style={{ paddingHorizontal: 4 }}>
-                <SectionLabel>Open</SectionLabel>
+              <View style={{ gap: 10 }}>
+                {open.map((r) => (
+                  <OpenCard key={r.id} r={r} />
+                ))}
               </View>
             )}
-            {open.map((r) => (
-              <Row key={r.id} r={r} />
-            ))}
+
             {solved.length > 0 && (
-              <View style={{ paddingHorizontal: 4, paddingTop: 14 }}>
-                <SectionLabel>Solved</SectionLabel>
+              <View style={{ marginTop: open.length > 0 ? 22 : 0 }}>
+                <View style={{ paddingHorizontal: 4, paddingBottom: 8 }}>
+                  <SectionLabel>Past</SectionLabel>
+                </View>
+                <GroupedCard>
+                  {solved.map((r, i) => (
+                    <PastGroupRow key={r.id} r={r} first={i === 0} />
+                  ))}
+                </GroupedCard>
               </View>
             )}
-            {solved.map((r) => (
-              <Row key={r.id} r={r} />
-            ))}
-          </View>
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function Row({ r }: { r: RequestSummary }) {
+function OpenCard({ r }: { r: RequestSummary }) {
   const router = useRouter();
-  const unread = r.unreadForRequester && r.status !== "solved";
-  const sub =
-    r.status === "solved"
-      ? r.selfSolvedArticleId
-        ? `Self-solved ${timeAgo(r.solvedAt)} ago · from suggested article`
-        : r.confirmationState === "confirmed"
-          ? `Solved ${timeAgo(r.solvedAt)} ago · you confirmed the fix`
-          : `Solved ${timeAgo(r.solvedAt)} ago`
-      : `Sent ${sentLabel(r.createdAt)}`;
+  const meta = r.status === "handled" ? `updated ${timeAgo(r.lastActivityAt)} ago` : "waiting for a supporter";
 
-  // unread: bold title + accent "New update" prefix, mail-style — no dots or
-  // pills. Opening the thread patches the cache, so it clears on tap.
   return (
-    <Card onPress={() => router.push(`/request/${r.id}`)} style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14 }}>
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontWeight: unread ? "800" : "600", fontSize: 15, color: colors.text, lineHeight: 20 }}>{r.title}</Text>
-        <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>
-          {unread && <Text style={{ color: colors.primary, fontWeight: "700" }}>New update · </Text>}
-          {sub}
-        </Text>
-      </View>
-      <StatusBadge status={r.status} />
+    <Card onPress={() => router.push(`/request/${r.id}`)} style={{ padding: 14 }}>
+      <StatusLine status={r.status === "handled" ? "handled" : "open"} meta={meta} />
+      <Text style={{ fontWeight: "800", fontSize: 16, color: colors.text, marginTop: 6, lineHeight: 21 }}>{r.title}</Text>
+      {r.lastMessage && (
+        <ReplyPreview
+          name={r.lastMessage.fromAi ? "kloop" : (r.lastMessage.authorName ?? "Reply")}
+          body={r.lastMessage.body}
+          unread={r.unreadForRequester}
+        />
+      )}
     </Card>
+  );
+}
+
+function PastGroupRow({ r, first }: { r: RequestSummary; first: boolean }) {
+  const router = useRouter();
+  const subtitle = r.selfSolvedArticleId ? `Self-solved ${dateLabel(r.solvedAt)}` : `Solved ${dateLabel(r.solvedAt)}`;
+  return (
+    <View>
+      {!first && <Divider />}
+      <PastRow title={r.title} subtitle={subtitle} onPress={() => router.push(`/request/${r.id}`)} />
+    </View>
   );
 }

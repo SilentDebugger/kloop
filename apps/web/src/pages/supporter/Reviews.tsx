@@ -2,11 +2,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import type { ReviewListItem } from "@kloop/shared";
+import { docStateLabel, type AiActivityItem, type DocState, type ReviewListItem } from "@kloop/shared";
 import { api } from "../../lib/api";
 import { timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
-import { Button, Card, EmptyState, ErrorState, KindBadge, Segmented, Spinner } from "../../ui";
+import { Button, Card, Divider, EmptyState, ErrorState, GroupedCard, KindBadge, SectionLabel, Segmented, Spinner } from "../../ui";
+import { IconChevron } from "../../ui/icons";
 
 type Tab = "draft" | "update" | "merge";
 
@@ -29,6 +30,8 @@ export function ReviewsPage() {
   return (
     <div className="mx-auto w-full max-w-xl px-4 pt-6 md:pt-10">
       <PageHeader title={t("nav.reviews")} />
+
+      <AiActivityFeed />
 
       <div className="mb-4">
         <Segmented<Tab>
@@ -68,6 +71,79 @@ export function ReviewsPage() {
       )}
     </div>
   );
+}
+
+/**
+ * The documentation pipeline made visible — one row per recent resolution:
+ * a pulsing sparkle while the AI writes, the settled outcome once it decided
+ * (new draft, covered by an existing doc, nothing to add, failed).
+ */
+function AiActivityFeed() {
+  const { data } = useQuery({
+    queryKey: ["ai-activity"],
+    queryFn: () => api.aiActivity(),
+    // SSE pushes updates too; poll fast only while something is in flight
+    refetchInterval: (q) => (q.state.data?.items.some((i) => i.state === "working") ? 5000 : 60_000),
+  });
+
+  const items = (data?.items ?? []).slice(0, 4);
+  if (items.length === 0) return null;
+
+  return (
+    <div className="fade-up mb-5">
+      <SectionLabel className="mb-2">✦ AI activity</SectionLabel>
+      <GroupedCard>
+        {items.map((item, i) => (
+          <div key={item.id}>
+            {i > 0 && <Divider />}
+            <ActivityRow item={item} />
+          </div>
+        ))}
+      </GroupedCard>
+    </div>
+  );
+}
+
+function ActivityRow({ item }: { item: AiActivityItem }) {
+  const navigate = useNavigate();
+  const headline = item.state === "working" ? `Writing up ${item.requestRef}…` : docStateLabel(item.state);
+  const detail = item.state === "working" ? item.requestTitle : (item.note ?? item.requestTitle);
+
+  // most useful target per outcome: the draft in review, the matched article,
+  // or the source thread
+  const open = () => {
+    if (item.state === "drafted" && item.reviewItemId) navigate(`/reviews/${item.reviewItemId}`);
+    else if ((item.state === "drafted" || item.state === "already_documented") && item.articleId) navigate(`/kb/${item.articleId}`);
+    else navigate(`/requests/${item.requestId}`);
+  };
+
+  return (
+    <button onClick={open} className="flex w-full cursor-pointer items-center gap-3 py-3 text-left">
+      <span className="flex w-[26px] shrink-0 items-center justify-center">
+        <ActivityGlyph state={item.state} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[14px] font-semibold text-ink">{headline}</span>
+        <span className="mt-0.5 block text-[12.5px] leading-snug text-ink-secondary">
+          {detail} · {timeAgo(item.createdAt)} ago
+        </span>
+      </span>
+      <IconChevron size={13} className="shrink-0 text-ink-faint" />
+    </button>
+  );
+}
+
+function ActivityGlyph({ state }: { state: DocState }) {
+  if (state === "working") return <span className="animate-pulse text-[15px] text-primary">✦</span>;
+  const map: Record<Exclude<DocState, "working">, [string, string]> = {
+    drafted: ["✦", "text-primary"],
+    already_documented: ["✓", "text-primary"],
+    covered_by_draft: ["✦", "text-ink-faint"],
+    skipped: ["–", "text-ink-faint"],
+    failed: ["!", "text-amber"],
+  };
+  const [glyph, tone] = map[state];
+  return <span className={`text-[15px] font-semibold ${tone}`}>{glyph}</span>;
 }
 
 function ReviewCard({ item }: { item: ReviewListItem }) {

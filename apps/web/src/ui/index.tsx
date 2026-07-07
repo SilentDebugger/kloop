@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
 import { forwardRef } from "react";
 import { initials } from "../lib/format";
+import { IconCheck, IconChevron } from "./icons";
 
 /* ------------------------------------------------------------------ */
 /* Logo — the ring mark                                                */
@@ -103,6 +104,57 @@ export function StatusBadge({ status }: { status: "open" | "handled" | "solved" 
   };
   const m = map[status] ?? { label: status, cls: "bg-chip text-ink-secondary" };
   return <span className={`inline-flex shrink-0 items-center rounded-full px-3 py-1 text-[12px] font-semibold ${m.cls}`}>{m.label}</span>;
+}
+
+/** open/handled status line — "● Being handled · updated 5m ago" */
+export function StatusLine({ status, meta }: { status: "open" | "handled"; meta: string }) {
+  const handled = status === "handled";
+  return (
+    <span className="flex items-center gap-1.5 text-[13px]">
+      <span className={`h-[7px] w-[7px] shrink-0 rounded-full ${handled ? "bg-primary" : "border-[1.5px] border-ink-faint"}`} />
+      <span className={`font-bold ${handled ? "text-primary" : "text-ink-secondary"}`}>{handled ? "Being handled" : "Open"}</span>
+      <span className="text-ink-secondary">· {meta}</span>
+    </span>
+  );
+}
+
+/** inline preview of the latest reply — avatar + "Name: "snippet…"" + optional unread dot */
+export function ReplyPreview({ name, body, unread }: { name: string; body: string; unread?: boolean }) {
+  const snippet = body.length > 72 ? `${body.slice(0, 72).trim()}…` : body;
+  return (
+    <span className="mt-2.5 flex items-center gap-2">
+      <Avatar name={name} size={26} tint />
+      <span className="min-w-0 flex-1 truncate text-[13px] text-ink-secondary">
+        <span className="font-bold text-ink">{name}: </span>"{snippet}"
+      </span>
+      {unread && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />}
+    </span>
+  );
+}
+
+/** flat white container for grouped rows (e.g. past/solved history); use <Divider /> between rows */
+export function GroupedCard({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <div className={`rounded-card bg-card px-4 shadow-card ${className}`}>{children}</div>;
+}
+
+export function Divider() {
+  return <div className="h-px bg-line" />;
+}
+
+/** compact "past" row inside a GroupedCard — checkmark + title/subtitle + chevron */
+export function PastRow({ title, subtitle, onClick }: { title: string; subtitle: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="flex w-full cursor-pointer items-center gap-3 py-3 text-left">
+      <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-mint text-primary">
+        <IconCheck size={13} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[15px] font-semibold text-ink">{title}</span>
+        <span className="block text-[13px] text-ink-secondary">{subtitle}</span>
+      </span>
+      <IconChevron size={14} className="shrink-0 text-ink-faint" />
+    </button>
+  );
 }
 
 export function TagChip({ tag }: { tag: string }) {

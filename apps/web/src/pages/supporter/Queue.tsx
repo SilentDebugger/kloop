@@ -7,7 +7,7 @@ import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
-import { Button, Card, Chip, EmptyState, ErrorState, Segmented, SectionLabel, Spinner, TagChip } from "../../ui";
+import { Button, Card, Chip, EmptyState, ErrorState, ReplyPreview, Segmented, SectionLabel, Spinner, StatusLine, TagChip } from "../../ui";
 import { IconCheck, IconPlus, IconX } from "../../ui/icons";
 import { NewRequestSheet } from "./NewRequestSheet";
 
@@ -198,25 +198,18 @@ function QueueRow({ r }: { r: RequestSummary }) {
     },
   });
 
-  const sub = [
-    r.author?.name,
-    r.autoAnswered && r.escalated ? "auto-answer didn't help" : null,
-    r.channel === "email" ? "via email-in" : null,
-    r.body ? `"${r.body.slice(0, 60)}${r.body.length > 60 ? "…" : ""}"` : null,
-  ]
+  const requesterName = r.author?.name ?? (r.guestName ? `${r.guestName} (guest)` : "Guest");
+  const meta = r.status === "handled" ? `updated ${timeAgo(r.lastActivityAt)} ago` : `received ${timeAgo(r.createdAt)} ago`;
+  const flags = [r.autoAnswered && r.escalated ? "auto-answer didn't help" : null, r.channel === "email" ? "via email-in" : null]
     .filter(Boolean)
     .join(" · ");
 
   return (
     <Card as="button" onClick={() => navigate(`/requests/${r.id}`)} className="p-4">
-      <span className="flex items-start gap-2.5">
-        {r.unreadForSupporter && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />}
-        <span className="min-w-0 flex-1">
-          <span className="block font-semibold leading-snug text-ink">{r.title}</span>
-          <span className="mt-0.5 block text-[13px] leading-snug text-ink-secondary">{sub}</span>
-        </span>
-        <span className="shrink-0 text-[12px] text-ink-faint">{timeAgo(r.createdAt)}</span>
-      </span>
+      <StatusLine status={r.status === "handled" ? "handled" : "open"} meta={meta} />
+      <span className="mt-1.5 block text-[16px] font-bold leading-snug text-ink">{r.title}</span>
+      {flags && <span className="mt-0.5 block text-[13px] text-ink-secondary">{flags}</span>}
+      {r.body && <ReplyPreview name={requesterName} body={r.body} unread={r.unreadForSupporter} />}
       <span className="mt-3 flex items-center gap-1.5">
         {r.tags.slice(0, 3).map((tg) => (
           <TagChip key={tg} tag={tg} />

@@ -1,13 +1,14 @@
 import { useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { colors, type ReviewListItem } from "@kloop/shared";
+import { colors, docStateLabel, type AiActivityItem, type ReviewListItem } from "@kloop/shared";
+import { SymbolView } from "expo-symbols";
 import { api } from "../../src/api";
 import { timeAgo } from "../../src/format";
 import { useActiveWorkspace } from "../../src/store/connection";
-import { Button, Card, EmptyState, KindBadge, PageTitle, Segmented, Spinner } from "../../src/ui";
+import { AiGlyph, Button, Card, Divider, EmptyState, GroupedCard, KindBadge, PageTitle, SectionLabel, Segmented, Spinner } from "../../src/ui";
 
 type Tab = "draft" | "update" | "merge";
 
@@ -34,6 +35,8 @@ export default function ReviewsScreen() {
           <PageTitle>Reviews</PageTitle>
         </View>
 
+        <AiActivityFeed />
+
         <View style={{ paddingBottom: 12 }}>
           <Segmented<Tab>
             value={tab}
@@ -59,6 +62,71 @@ export default function ReviewsScreen() {
         )}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+/**
+ * The documentation pipeline made visible — one row per recent resolution:
+ * a pulsing sparkle while the AI writes, and what it decided once it's done
+ * (new draft, covered by an existing doc, nothing to add, failed).
+ */
+function AiActivityFeed() {
+  const { data } = useQuery({
+    queryKey: ["ai-activity"],
+    queryFn: () => api.aiActivity(),
+    // SSE pushes updates too; poll fast only while something is in flight
+    refetchInterval: (q) => (q.state.data?.items.some((i) => i.state === "working") ? 5000 : 60_000),
+  });
+
+  const items = (data?.items ?? []).slice(0, 4);
+  if (items.length === 0) return null;
+
+  return (
+    <View style={{ paddingBottom: 16, gap: 8 }}>
+      <SectionLabel>✦ AI activity</SectionLabel>
+      <GroupedCard>
+        {items.map((item, i) => (
+          <View key={item.id}>
+            {i > 0 && <Divider />}
+            <ActivityRow item={item} />
+          </View>
+        ))}
+      </GroupedCard>
+    </View>
+  );
+}
+
+function ActivityRow({ item }: { item: AiActivityItem }) {
+  const router = useRouter();
+  const headline = item.state === "working" ? `Writing up ${item.requestRef}…` : docStateLabel(item.state);
+  const detail = item.state === "working" ? item.requestTitle : (item.note ?? item.requestTitle);
+
+  // most useful target per outcome: the draft in review, the matched article,
+  // or the source thread
+  const open = () => {
+    if (item.state === "drafted" && item.reviewItemId) router.push(`/review/${item.reviewItemId}`);
+    else if ((item.state === "drafted" || item.state === "already_documented") && item.articleId) router.push(`/article/${item.articleId}`);
+    else router.push(`/request/${item.requestId}`);
+  };
+
+  return (
+    <Pressable
+      onPress={open}
+      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, opacity: pressed ? 0.6 : 1 })}
+    >
+      <View style={{ width: 26, alignItems: "center" }}>
+        <AiGlyph state={item.state} size={16} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: "600", color: colors.text }}>
+          {headline}
+        </Text>
+        <Text numberOfLines={2} style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 1, lineHeight: 17 }}>
+          {detail} · {timeAgo(item.createdAt)} ago
+        </Text>
+      </View>
+      <SymbolView name={{ ios: "chevron.right", android: "chevron_right" }} size={12} tintColor={colors.textFaint} />
+    </Pressable>
   );
 }
 

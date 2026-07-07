@@ -15,6 +15,15 @@ export type SessionUser = {
 
 export type PersonRef = { id: string; name: string; email?: string; role?: Role } | null;
 
+/** Latest customer-facing message on a request, for inbox-style reply previews. */
+export type LastMessagePreview = {
+  /** null for AI auto-answers or when the sender's account no longer resolves */
+  authorName: string | null;
+  fromAi: boolean;
+  body: string;
+  createdAt: string;
+};
+
 export type RequestSummary = {
   id: string;
   ref: string;
@@ -38,6 +47,7 @@ export type RequestSummary = {
   author?: PersonRef;
   claimer?: PersonRef;
   authorPastRequests?: number;
+  lastMessage?: LastMessagePreview | null;
 };
 
 export type MessageView = {
@@ -61,9 +71,28 @@ export type ResolutionView = {
   trusted: boolean;
   linkedResolutionId: string | null;
   articleId: string | null;
+  docState: DocState;
+  docNote: string | null;
   createdAt: string;
   supporterName: string | null;
   attachments: AttachmentRef[];
+};
+
+/** Documentation pipeline state for a resolution — what the AI did with it. */
+export type DocState = "working" | "drafted" | "already_documented" | "covered_by_draft" | "skipped" | "failed";
+
+/** One row of the supporter-facing "AI activity" feed. */
+export type AiActivityItem = {
+  id: string;
+  requestId: string;
+  requestRef: string;
+  requestTitle: string;
+  supporterName: string;
+  createdAt: string;
+  state: DocState;
+  note: string | null;
+  articleId: string | null;
+  reviewItemId: string | null;
 };
 
 /** Admin onboarding checklist: steps derive from live data, so they self-complete. */

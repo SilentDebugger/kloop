@@ -5,9 +5,9 @@ import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { colors, type RequestSummary } from "@kloop/shared";
 import { api } from "../../src/api";
-import { timeAgo } from "../../src/format";
+import { dateLabel, timeAgo } from "../../src/format";
 import { useActiveWorkspace } from "../../src/store/connection";
-import { Card, Chip, EmptyState, PageTitle, SectionLabel, Spinner, StatusBadge } from "../../src/ui";
+import { Card, Chip, Divider, EmptyState, GroupedCard, PageTitle, PastRow, ReplyPreview, SectionLabel, Spinner, StatusLine } from "../../src/ui";
 
 /** The requester a row belongs to (guests count too) — used for the person filter. */
 function requesterName(r: RequestSummary): string | null {
@@ -47,10 +47,10 @@ export default function MyWorkScreen() {
         ) : shown.length === 0 ? (
           <EmptyState title="Nothing for this person" hint="They have no requests in your claimed work." />
         ) : (
-          <View style={{ gap: 18 }}>
-            {active.length > 0 && <Group label={`Handling · ${active.length}`} rows={active} />}
-            {waiting.length > 0 && <Group label={`Waiting for confirmation · ${waiting.length}`} rows={waiting} />}
-            {solved.length > 0 && <Group label="Recently solved" rows={solved} />}
+          <View style={{ gap: 22 }}>
+            {active.length > 0 && <ActiveGroup label={`Handling · ${active.length}`} rows={active} />}
+            {waiting.length > 0 && <ActiveGroup label={`Waiting for confirmation · ${waiting.length}`} rows={waiting} waitingOnConfirmation />}
+            {solved.length > 0 && <PastGroup rows={solved} />}
           </View>
         )}
       </ScrollView>
@@ -58,24 +58,61 @@ export default function MyWorkScreen() {
   );
 }
 
-function Group({ label, rows }: { label: string; rows: RequestSummary[] }) {
+function ActiveGroup({ label, rows, waitingOnConfirmation }: { label: string; rows: RequestSummary[]; waitingOnConfirmation?: boolean }) {
   const router = useRouter();
   return (
     <View style={{ gap: 8 }}>
       <View style={{ paddingHorizontal: 4 }}>
         <SectionLabel>{label}</SectionLabel>
       </View>
-      {rows.map((r) => (
-        <Card key={r.id} onPress={() => router.push(`/request/${r.id}`)} style={{ padding: 14, flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontWeight: r.unreadForSupporter ? "800" : "600", fontSize: 15, color: colors.text, lineHeight: 20 }}>{r.title}</Text>
-            <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>
-              {r.ref} · {requesterName(r) ?? ""} · {timeAgo(r.lastActivityAt)} ago
-            </Text>
+      <View style={{ gap: 10 }}>
+        {rows.map((r) => {
+          const meta = waitingOnConfirmation ? "awaiting confirmation" : `updated ${timeAgo(r.lastActivityAt)} ago`;
+          return (
+            <Card key={r.id} onPress={() => router.push(`/request/${r.id}`)} style={{ padding: 14 }}>
+              <StatusLine status="handled" meta={meta} />
+              <Text
+                style={{ fontWeight: r.unreadForSupporter ? "800" : "700", fontSize: 16, color: colors.text, marginTop: 6, lineHeight: 21 }}
+              >
+                {r.title}
+              </Text>
+              <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>
+                {r.ref} · {requesterName(r) ?? ""}
+              </Text>
+              {r.lastMessage && (
+                <ReplyPreview
+                  name={r.lastMessage.fromAi ? "kloop" : (r.lastMessage.authorName ?? "Reply")}
+                  body={r.lastMessage.body}
+                  unread={r.unreadForSupporter}
+                />
+              )}
+            </Card>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function PastGroup({ rows }: { rows: RequestSummary[] }) {
+  const router = useRouter();
+  return (
+    <View style={{ gap: 8 }}>
+      <View style={{ paddingHorizontal: 4 }}>
+        <SectionLabel>Recently solved</SectionLabel>
+      </View>
+      <GroupedCard>
+        {rows.map((r, i) => (
+          <View key={r.id}>
+            {i > 0 && <Divider />}
+            <PastRow
+              title={r.title}
+              subtitle={`Solved ${dateLabel(r.solvedAt)} · ${requesterName(r) ?? ""}`}
+              onPress={() => router.push(`/request/${r.id}`)}
+            />
           </View>
-          <StatusBadge status={r.status} />
-        </Card>
-      ))}
+        ))}
+      </GroupedCard>
     </View>
   );
 }

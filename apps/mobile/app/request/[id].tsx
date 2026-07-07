@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Keyboard,
+  LayoutAnimation,
   Platform,
   Pressable,
   ScrollView,
@@ -17,13 +20,13 @@ import { BlurView } from "expo-blur";
 import { SymbolView } from "expo-symbols";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { autoAnswerSkipLabel, colors, radii, type MessageView, type RequestDetail, type RequestSummary, type ResolutionView } from "@kloop/shared";
+import { autoAnswerSkipLabel, colors, docStateLabel, radii, type DeflectionSuggestion, type MessageView, type RequestDetail, type RequestSummary, type ResolutionView } from "@kloop/shared";
 import { api } from "../../src/api";
 import { clockTime, sentLabel } from "../../src/format";
 import { useActiveWorkspace } from "../../src/store/connection";
 import { pickImage, uploadFile } from "../../src/uploads";
 import { useVoiceNote } from "../../src/recorder";
-import { Button, Chip, GlassSurface, liquidGlass, SectionLabel, Spinner, StatusBadge } from "../../src/ui";
+import { AiGlyph, Button, Chip, GlassSurface, liquidGlass, Logo, SectionLabel, Spinner, StatusBadge } from "../../src/ui";
 import { AttachmentTray, RemoteAttachments, type LocalAttachment } from "../../src/ui/attachments";
 
 /** Request thread — requester confirm loop / supporter workbench in one route. */
@@ -137,17 +140,153 @@ function useStickyScroll() {
 /**
  * What was sent when the request was created, rendered like a chat message —
  * the intake photo / voice note would otherwise be invisible in the thread.
+ * Requests created before the title/body split store everything in the title,
+ * so fall back to it: the thread should always open with the user's message.
  */
-function originalMessage({ request, attachments }: RequestDetail): MessageView | null {
-  if (!request.body.trim() && attachments.length === 0) return null;
+function originalMessage({ request, attachments }: RequestDetail): MessageView {
   return {
     id: "original",
     kind: "message",
-    body: request.body,
+    body: request.body.trim() || request.title,
     author: request.author ?? (request.guestName ? { id: "guest", name: request.guestName } : null),
     createdAt: request.createdAt,
     attachments,
   };
+}
+
+/**
+ * Mounts children while `show` is true; when it flips false, fades them out
+ * and collapses the freed space (LayoutAnimation) instead of snapping — the
+ * "request received" intro melts away the moment a supporter claims.
+ */
+function FadeAway({ show, children }: { show: boolean; children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(show);
+  const opacity = useRef(new Animated.Value(show ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (show && !mounted) {
+      setMounted(true);
+      opacity.setValue(1);
+      return;
+    }
+    if (!show && mounted) {
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 420,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished) return;
+        LayoutAnimation.configureNext(
+          LayoutAnimation.create(300, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity),
+        );
+        setMounted(false);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, mounted]);
+
+  if (!mounted) return null;
+  return <Animated.View style={{ opacity }}>{children}</Animated.View>;
+}
+
+/** "Request received" confirmation card — shown until a supporter (or the AI) takes over. */
+function ReceivedCard({ requestId, orgName, hasImage }: { requestId: string; orgName: string; hasImage: boolean }) {
+  const qc = useQueryClient();
+  const [sending, setSending] = useState(false);
+
+  const addScreenshot = async () => {
+    try {
+      const picked = await pickImage(false);
+      if (!picked) return;
+      setSending(true);
+      const a = await uploadFile(picked);
+      await api.postMessage(requestId, { body: "", kind: "message", attachmentIds: [a.id] });
+      void qc.invalidateQueries({ queryKey: ["request", requestId] });
+    } catch {
+      // upload/post failed — the composer remains as the fallback path
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <View style={{ backgroundColor: colors.card, borderRadius: radii.lg, padding: 16, gap: 12 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Logo size={32} stroke={5.5} />
+        <View>
+          <Text style={{ fontWeight: "800", fontSize: 16, color: colors.text }}>Request received</Text>
+          <Text style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 1 }}>{orgName} · automatic</Text>
+        </View>
+      </View>
+      <Text style={{ fontSize: 14.5, lineHeight: 21, color: colors.text }}>
+        You're in the queue. We'll notify you the moment someone picks this up —{" "}
+        <Text style={{ fontWeight: "700" }}>usually within 15 minutes</Text> on weekdays.
+      </Text>
+      {!hasImage && (
+        <Pressable
+          onPress={() => void addScreenshot()}
+          disabled={sending}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+            backgroundColor: colors.chip,
+            borderRadius: radii.md,
+            padding: 12,
+            opacity: pressed ? 0.7 : 1,
+          })}
+        >
+          {sending ? (
+            <ActivityIndicator size="small" color={colors.textSecondary} />
+          ) : (
+            <SymbolView name={{ ios: "camera", android: "photo_camera" }} size={17} tintColor={colors.textSecondary} />
+          )}
+          <Text style={{ flex: 1, fontSize: 13.5, color: colors.textSecondary, lineHeight: 19 }}>
+            A screenshot of the error usually speeds things up.{" "}
+            <Text style={{ color: colors.primary, fontWeight: "700" }}>Add one</Text>
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+/** Deflection suggestions inside the thread — the request might not need a human at all. */
+function WhileYouWait({ suggestions }: { suggestions: DeflectionSuggestion[] }) {
+  const router = useRouter();
+  return (
+    <View style={{ gap: 8, marginTop: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 4 }}>
+        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
+        <SectionLabel>While you wait — this might fix it</SectionLabel>
+      </View>
+      {suggestions.map((s) => (
+        <Pressable
+          key={s.id}
+          onPress={() => router.push(`/article/${s.id}`)}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+            backgroundColor: colors.card,
+            borderRadius: radii.lg,
+            padding: 14,
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontWeight: "700", fontSize: 15, color: colors.text, lineHeight: 20 }}>{s.title}</Text>
+            <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>
+              {s.kb}
+              {s.helpfulPercent != null ? ` · ${s.helpfulPercent}% found this helpful` : ""}
+            </Text>
+          </View>
+          <SymbolView name={{ ios: "chevron.right", android: "chevron_right" }} size={13} tintColor={colors.textFaint} />
+        </Pressable>
+      ))}
+    </View>
+  );
 }
 
 function RequesterThread({ detail }: { detail: RequestDetail }) {
@@ -168,6 +307,21 @@ function RequesterThread({ detail }: { detail: RequestDetail }) {
 
   const reached = request.status === "solved" ? 2 : request.status === "handled" ? 1 : 0;
   const resolverName = request.claimer?.name ?? "Support";
+
+  // fresh unclaimed request → intro card + article suggestions, both of which
+  // fade away the moment a supporter (or the AI) takes over. On-behalf
+  // requests are claimed at creation, so they never see this state.
+  const waiting = request.status === "open" && !request.claimedBy && !request.autoAnswered;
+  const { data: deflectData } = useQuery({
+    queryKey: ["thread-deflect", request.id],
+    queryFn: () => api.deflect((request.body.trim() || request.title).slice(0, 4000)),
+    enabled: waiting,
+    staleTime: Infinity,
+  });
+  const suggestions = (deflectData?.suggestions ?? []).slice(0, 2);
+  const hasImage =
+    detail.attachments.some((a) => a.kind === "image") ||
+    messages.some((m) => (m.attachments ?? []).some((a) => a.kind === "image"));
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
@@ -197,6 +351,13 @@ function RequesterThread({ detail }: { detail: RequestDetail }) {
           {[originalMessage(detail), ...messages].map(
             (m) => m && <Bubble key={m.id} m={m} ownId={ws?.user?.id ?? ""} />,
           )}
+
+          <FadeAway show={waiting}>
+            <View style={{ gap: 10 }}>
+              <ReceivedCard requestId={request.id} orgName={ws?.name ?? "Support"} hasImage={hasImage} />
+              {suggestions.length > 0 && <WhileYouWait suggestions={suggestions} />}
+            </View>
+          </FadeAway>
 
           {request.confirmationState === "pending" && (
             <View style={{ backgroundColor: colors.mint, borderRadius: radii.lg, padding: 18, gap: 4 }}>
@@ -324,7 +485,10 @@ function Workbench({ detail }: { detail: RequestDetail }) {
 
           {/* once resolved, the capture replaces the "Mark resolved" button */}
           {resolutions[0] && (request.confirmationState === "pending" || request.status === "solved") && (
-            <ResolutionCard r={resolutions[0]} />
+            <>
+              <ResolutionCard r={resolutions[0]} />
+              <DocStatusLine r={resolutions[0]} />
+            </>
           )}
           {request.status !== "solved" && request.confirmationState !== "pending" && (
             <Pressable
@@ -367,6 +531,35 @@ function ResolutionCard({ r }: { r: ResolutionView }) {
       <Text style={{ fontSize: 12, color: colors.textSecondary }}>
         {r.supporterName ?? "Support"} · {clockTime(r.createdAt)}
       </Text>
+    </View>
+  );
+}
+
+/**
+ * What the AI is doing with this capture — the strip under the resolution
+ * card that removes the post-resolve blind spot. Pulses while working,
+ * settles into the outcome (+ link) once the pipeline decided.
+ */
+function DocStatusLine({ r }: { r: ResolutionView }) {
+  const router = useRouter();
+  const link =
+    r.docState === "already_documented" && r.articleId
+      ? { label: "View ›", go: () => router.push(`/article/${r.articleId}`) }
+      : r.docState === "drafted"
+        ? { label: "Review ›", go: () => router.push("/(supporter)/reviews") }
+        : null;
+
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.surface, borderRadius: radii.md, paddingVertical: 10, paddingHorizontal: 14 }}>
+      <AiGlyph state={r.docState} />
+      <Text style={{ flex: 1, fontSize: 13, fontWeight: "500", color: colors.textSecondary, lineHeight: 18 }}>
+        {r.docNote ?? docStateLabel(r.docState)}
+      </Text>
+      {link && (
+        <Pressable onPress={link.go} hitSlop={8}>
+          <Text style={{ fontSize: 13, fontWeight: "600", color: colors.primary }}>{link.label}</Text>
+        </Pressable>
+      )}
     </View>
   );
 }

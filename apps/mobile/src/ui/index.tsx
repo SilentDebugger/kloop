@@ -1,6 +1,8 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Pressable,
   StyleSheet,
   Text,
@@ -11,7 +13,8 @@ import {
   type ViewStyle,
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
-import { colors, radii } from "@kloop/shared";
+import { SymbolView } from "expo-symbols";
+import { colors, radii, type DocState } from "@kloop/shared";
 import { GlassSurface } from "./glass";
 
 export { GlassSurface, liquidGlass } from "./glass";
@@ -186,6 +189,66 @@ export function StatusBadge({ status }: { status: string }) {
   );
 }
 
+/** open/handled status line — "● Being handled · updated 5m ago" */
+export function StatusLine({ status, meta }: { status: "open" | "handled"; meta: string }) {
+  const handled = status === "handled";
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      {handled ? (
+        <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: colors.primary }} />
+      ) : (
+        <View style={{ width: 7, height: 7, borderRadius: 3.5, borderWidth: 1.5, borderColor: colors.textFaint }} />
+      )}
+      <Text style={{ fontSize: 13, fontWeight: "700", color: handled ? colors.primary : colors.textSecondary }}>
+        {handled ? "Being handled" : "Open"}
+      </Text>
+      <Text style={{ fontSize: 13, color: colors.textSecondary }}>· {meta}</Text>
+    </View>
+  );
+}
+
+/** inline preview of the latest reply — avatar + "Name: "snippet…"" + optional unread dot */
+export function ReplyPreview({ name, body, unread }: { name: string; body: string; unread?: boolean }) {
+  const snippet = body.length > 64 ? `${body.slice(0, 64).trim()}…` : body;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 }}>
+      <Avatar name={name} size={26} tint />
+      <Text style={{ flex: 1, fontSize: 13, color: colors.textSecondary, lineHeight: 18 }} numberOfLines={1}>
+        <Text style={{ color: colors.text, fontWeight: "700" }}>{name}: </Text>"{snippet}"
+      </Text>
+      {unread && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary }} />}
+    </View>
+  );
+}
+
+/** flat white container for grouped rows (e.g. past/solved history), dividers drawn by the caller */
+export function GroupedCard({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  return <View style={[{ backgroundColor: colors.card, borderRadius: radii.lg, paddingHorizontal: 14 }, style]}>{children}</View>;
+}
+
+export function Divider() {
+  return <View style={{ height: 1, backgroundColor: colors.border }} />;
+}
+
+/** compact "past" row inside a GroupedCard — checkmark + title/subtitle + chevron */
+export function PastRow({ title, subtitle, onPress }: { title: string; subtitle: string; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, opacity: pressed ? 0.6 : 1 })}
+    >
+      <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: colors.mint, alignItems: "center", justifyContent: "center" }}>
+        <SymbolView name={{ ios: "checkmark", android: "check" }} size={13} weight="bold" tintColor={colors.primary} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: "600", color: colors.text }}>{title}</Text>
+        <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 1 }}>{subtitle}</Text>
+      </View>
+      <SymbolView name={{ ios: "chevron.right", android: "chevron_right" }} size={13} tintColor={colors.textFaint} />
+    </Pressable>
+  );
+}
+
 export function KindBadge({ kind }: { kind: string }) {
   const map: Record<string, { label: string; bg: string; fg: string }> = {
     draft: { label: "NEW DRAFT", bg: colors.mint, fg: colors.primary },
@@ -323,6 +386,39 @@ export function Segmented<T extends string>({
       ))}
     </GlassSurface>
   );
+}
+
+/**
+ * Documentation-pipeline glyph: a softly pulsing sparkle while the AI is
+ * writing, a settled SF Symbol once it decided. Shared by the AI activity
+ * feed and the thread status line.
+ */
+export function AiGlyph({ state, size = 15 }: { state: DocState; size?: number }) {
+  if (state === "working") return <PulsingSparkle size={size} />;
+  const map = {
+    drafted: { ios: "doc.badge.plus", android: "note_add", tint: colors.primary },
+    already_documented: { ios: "checkmark.circle.fill", android: "check_circle", tint: colors.primary },
+    covered_by_draft: { ios: "doc.on.doc", android: "file_copy", tint: colors.textSecondary },
+    skipped: { ios: "minus.circle", android: "do_not_disturb_on", tint: colors.textFaint },
+    failed: { ios: "exclamationmark.circle.fill", android: "error", tint: colors.amber },
+  } as const;
+  const m = map[state];
+  return <SymbolView name={{ ios: m.ios, android: m.android }} size={size} tintColor={m.tint} />;
+}
+
+function PulsingSparkle({ size }: { size: number }) {
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.3, duration: 750, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 750, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return <Animated.Text style={{ opacity, fontSize: size, color: colors.primary }}>✦</Animated.Text>;
 }
 
 export function CountBadge({ n }: { n: number }) {

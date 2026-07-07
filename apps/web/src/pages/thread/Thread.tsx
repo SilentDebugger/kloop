@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { autoAnswerSkipLabel, type AttachmentRef, type MessageView, type RequestDetail } from "@kloop/shared";
+import { autoAnswerSkipLabel, docStateLabel, type AttachmentRef, type DeflectionSuggestion, type MessageView, type RequestDetail, type ResolutionView } from "@kloop/shared";
 import { api } from "../../lib/api";
 import { isSupporter as roleIsSupporter, useAuth } from "../../lib/auth";
 import { clockTime, sentLabel } from "../../lib/format";
 import { useVoiceRecorder } from "../../lib/recorder";
-import { Button, Card, Chip, ErrorState, SectionLabel, Spinner, StatusBadge } from "../../ui";
-import { IconCheck, IconMic, IconPaperclip, IconSend, IconSparkle, IconX } from "../../ui/icons";
+import { Button, Card, Chip, ErrorState, Logo, SectionLabel, Spinner, StatusBadge } from "../../ui";
+import { IconCamera, IconCheck, IconChevron, IconMic, IconPaperclip, IconSend, IconSparkle, IconX } from "../../ui/icons";
 import { BackBar } from "../shared/BackBar";
 import { ResolveSheet } from "./ResolveSheet";
 
@@ -47,17 +47,137 @@ export function ThreadPage() {
 /**
  * What was sent when the request was created, rendered like a chat message —
  * the intake photo / voice note would otherwise be invisible in the thread.
+ * Requests created before the title/body split store everything in the title,
+ * so fall back to it: the thread should always open with the user's message.
  */
-function originalMessage({ request, attachments }: RequestDetail): MessageView | null {
-  if (!request.body.trim() && attachments.length === 0) return null;
+function originalMessage({ request, attachments }: RequestDetail): MessageView {
   return {
     id: "original",
     kind: "message",
-    body: request.body,
+    body: request.body.trim() || request.title,
     author: request.author ?? (request.guestName ? { id: "guest", name: request.guestName } : null),
     createdAt: request.createdAt,
     attachments,
   };
+}
+
+/**
+ * Mounts children while `show` is true; when it flips false, fades and
+ * collapses them smoothly instead of snapping — the "request received" intro
+ * melts away the moment a supporter claims.
+ */
+function FadeAway({ show, children }: { show: boolean; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(show);
+
+  useEffect(() => {
+    if (show) {
+      setMounted(true);
+      return;
+    }
+    const el = ref.current;
+    if (!el || !mounted) return;
+    // fix the current height so it can transition to 0
+    el.style.height = `${el.scrollHeight}px`;
+    el.style.overflow = "hidden";
+    el.style.transition = "height 480ms cubic-bezier(0.4, 0, 0.2, 1), opacity 320ms ease-out, transform 480ms cubic-bezier(0.4, 0, 0.2, 1)";
+    requestAnimationFrame(() => {
+      el.style.height = "0px";
+      el.style.opacity = "0";
+      el.style.transform = "translateY(-6px) scale(0.98)";
+    });
+    const t = setTimeout(() => setMounted(false), 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show]);
+
+  if (!mounted) return null;
+  return <div ref={ref}>{children}</div>;
+}
+
+/** "Request received" confirmation card — shown until a supporter (or the AI) takes over. */
+function ReceivedCard({ requestId, orgName, hasImage }: { requestId: string; orgName: string; hasImage: boolean }) {
+  const qc = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [sending, setSending] = useState(false);
+
+  const addScreenshot = async (file: File) => {
+    setSending(true);
+    try {
+      const res = await api.upload({ blob: file, name: file.name });
+      await api.postMessage(requestId, { body: "", kind: "message", attachmentIds: [res.attachment.id] });
+      void qc.invalidateQueries({ queryKey: ["request", requestId] });
+    } catch {
+      // upload/post failed — the composer remains as the fallback path
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-center gap-3">
+        <Logo size={32} stroke={5.5} />
+        <div>
+          <div className="text-[16px] font-extrabold text-ink">Request received</div>
+          <div className="text-[12.5px] text-ink-secondary">{orgName} · automatic</div>
+        </div>
+      </div>
+      <p className="mt-3 text-[14.5px] leading-relaxed text-ink">
+        You're in the queue. We'll notify you the moment someone picks this up —{" "}
+        <strong className="font-bold">usually within 15 minutes</strong> on weekdays.
+      </p>
+      {!hasImage && (
+        <>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void addScreenshot(f);
+              e.target.value = "";
+            }}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={sending}
+            className="mt-3 flex w-full cursor-pointer items-center gap-2.5 rounded-inner bg-chip p-3 text-left transition-opacity hover:opacity-80 disabled:opacity-60"
+          >
+            {sending ? <Spinner size={16} /> : <IconCamera size={17} className="shrink-0 text-ink-secondary" />}
+            <span className="text-[13.5px] leading-snug text-ink-secondary">
+              A screenshot of the error usually speeds things up. <span className="font-bold text-primary">Add one</span>
+            </span>
+          </button>
+        </>
+      )}
+    </Card>
+  );
+}
+
+/** Deflection suggestions inside the thread — the request might not need a human at all. */
+function WhileYouWait({ suggestions }: { suggestions: DeflectionSuggestion[] }) {
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      <div className="flex items-center gap-2 px-1">
+        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+        <SectionLabel>While you wait — this might fix it</SectionLabel>
+      </div>
+      {suggestions.map((s) => (
+        <Link key={s.id} to={`/kb/${s.id}`} className="flex items-center gap-3 rounded-card bg-card p-4 shadow-card transition-shadow hover:shadow-float">
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-bold leading-snug text-ink">{s.title}</span>
+            <span className="mt-0.5 block text-[13px] text-ink-secondary">
+              {s.kb}
+              {s.helpfulPercent != null ? ` · ${s.helpfulPercent}% found this helpful` : ""}
+            </span>
+          </span>
+          <IconChevron size={14} className="shrink-0 text-ink-faint" />
+        </Link>
+      ))}
+    </div>
+  );
 }
 
 function RequesterThreadView({ detail }: { detail: RequestDetail }) {
@@ -78,6 +198,22 @@ function RequesterThreadView({ detail }: { detail: RequestDetail }) {
   const resolverName =
     request.claimer?.name ?? messages.filter((m) => m.author && m.author.id !== user?.id).at(-1)?.author?.name ?? "Support";
 
+  // fresh unclaimed request → intro card + article suggestions, both of which
+  // fade away the moment a supporter (or the AI) takes over. On-behalf
+  // requests are claimed at creation, so they never see this state.
+  const waiting = request.status === "open" && !request.claimedBy && !request.autoAnswered;
+  const { data: orgData } = useQuery({ queryKey: ["org"], queryFn: () => api.org(), staleTime: Infinity });
+  const { data: deflectData } = useQuery({
+    queryKey: ["thread-deflect", request.id],
+    queryFn: () => api.deflect((request.body.trim() || request.title).slice(0, 4000)),
+    enabled: waiting,
+    staleTime: Infinity,
+  });
+  const suggestions = (deflectData?.suggestions ?? []).slice(0, 2);
+  const hasImage =
+    detail.attachments.some((a) => a.kind === "image") ||
+    messages.some((m) => (m.attachments ?? []).some((a) => a.kind === "image"));
+
   return (
     <div className="mx-auto flex min-h-full w-full max-w-xl flex-col px-4 pt-4">
       <BackBar
@@ -92,6 +228,17 @@ function RequesterThreadView({ detail }: { detail: RequestDetail }) {
         {[originalMessage(detail), ...messages].map(
           (m) => m && <MessageBubble key={m.id} m={m} ownId={user?.id ?? ""} />,
         )}
+
+        <FadeAway show={waiting}>
+          <div className="flex flex-col gap-3">
+            <ReceivedCard
+              requestId={request.id}
+              orgName={String((orgData?.org as { name?: string } | undefined)?.name ?? "Support")}
+              hasImage={hasImage}
+            />
+            {suggestions.length > 0 && <WhileYouWait suggestions={suggestions} />}
+          </div>
+        </FadeAway>
 
         {request.confirmationState === "pending" && (
           <div className="fade-up rounded-card bg-mint p-5">
@@ -272,6 +419,9 @@ function WorkbenchView({ detail }: { detail: RequestDetail }) {
         {request.confirmationState === "pending" && (
           <div className="text-center text-[13px] text-ink-secondary">Waiting for {request.author?.name ?? "the requester"} to confirm the fix.</div>
         )}
+        {detail.resolutions[0] && (request.confirmationState === "pending" || request.status === "solved") && (
+          <DocStatusLine r={detail.resolutions[0]} />
+        )}
       </div>
 
       <Composer requestId={request.id} supporter />
@@ -286,6 +436,32 @@ function WorkbenchView({ detail }: { detail: RequestDetail }) {
           void qc.invalidateQueries({ queryKey: ["requests"] });
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * What the AI is doing with the resolution capture — pulses while it writes,
+ * settles into the outcome (draft ready / already documented / nothing to
+ * add) so the supporter is never left guessing after resolving.
+ */
+function DocStatusLine({ r }: { r: ResolutionView }) {
+  const link =
+    r.docState === "already_documented" && r.articleId
+      ? { to: `/kb/${r.articleId}`, label: "View article ›" }
+      : r.docState === "drafted"
+        ? { to: "/reviews", label: "Review ›" }
+        : null;
+
+  return (
+    <div className="fade-up flex items-center gap-2.5 rounded-inner bg-surface px-4 py-2.5 text-[13px] font-medium text-ink-secondary">
+      <span aria-hidden className={r.docState === "working" ? "animate-pulse text-primary" : undefined}>✦</span>
+      <span className="min-w-0 flex-1">{r.docNote ?? docStateLabel(r.docState)}</span>
+      {link && (
+        <Link to={link.to} className="shrink-0 font-semibold text-primary">
+          {link.label}
+        </Link>
+      )}
     </div>
   );
 }

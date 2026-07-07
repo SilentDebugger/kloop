@@ -47,6 +47,11 @@ export function useRealtime(): void {
         if (data?.requestId) invalidate(["request", String(data.requestId)]);
       });
       es.addEventListener("review_changed", () => invalidate(["reviews"], ["review-counts"]));
+      es.addEventListener("ai_activity", (e) => {
+        const data = safeParse(e.data);
+        invalidate(["ai-activity"]);
+        if (data?.requestId) invalidate(["request", String(data.requestId)]);
+      });
       es.addEventListener("notification", () => invalidate(["notifications"]));
     };
 

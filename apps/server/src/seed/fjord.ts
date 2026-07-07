@@ -328,6 +328,8 @@ export async function seedFjord(): Promise<SeedSummary> {
         trusted: opts?.trusted ?? true,
         articleId: opts?.articleId,
         linkedResolutionId: opts?.linkedResolutionId,
+        // seeded history is settled — never show it as an in-flight pipeline
+        docState: opts?.articleId ? "already_documented" : "skipped",
         createdAt: req.solvedAt ?? minutesLater(req.createdAt, 25),
       })
       .returning();

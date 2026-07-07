@@ -45,6 +45,33 @@ function requestSummary(r: typeof tables.requests.$inferSelect) {
   };
 }
 
+/**
+ * Latest customer-facing message per request (for inbox-style reply previews).
+ * Internal notes and system events are excluded — only human replies and AI
+ * auto-answers count as a "reply" worth previewing.
+ */
+async function lastMessagesByRequest(
+  requestIds: string[],
+): Promise<Map<string, { authorId: string | null; kind: string; body: string; createdAt: Date }>> {
+  if (requestIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      requestId: tables.messages.requestId,
+      authorId: tables.messages.authorId,
+      kind: tables.messages.kind,
+      body: tables.messages.body,
+      createdAt: tables.messages.createdAt,
+    })
+    .from(tables.messages)
+    .where(and(inArray(tables.messages.requestId, requestIds), inArray(tables.messages.kind, ["message", "auto_answer"])))
+    .orderBy(desc(tables.messages.createdAt));
+  const map = new Map<string, { authorId: string | null; kind: string; body: string; createdAt: Date }>();
+  for (const row of rows) {
+    if (!map.has(row.requestId)) map.set(row.requestId, row);
+  }
+  return map;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function loadOwnedRequest(c: Context<AppEnv, any>) {
   const org = c.get("org");
@@ -79,12 +106,32 @@ async function addSystemMessage(orgId: string, requestId: string, body: string):
 // Create (one-box composer / API / email-in adds channel)
 // ---------------------------------------------------------------------------
 
+/**
+ * The one-box composers send the whole message as `title` with an empty body.
+ * Split that into a short list-friendly title + the full message as the body,
+ * so the thread can echo what the user actually wrote as their first chat
+ * message (lists would otherwise show a paragraph as the title).
+ */
+function splitOneBoxMessage(title: string, body: string): { title: string; body: string } {
+  if (body.trim()) return { title, body };
+  const full = title.trim();
+  const firstLine = full.split("\n")[0].trim();
+  let short = firstLine;
+  if (short.length > 72) {
+    const cut = short.slice(0, 72);
+    const lastSpace = cut.lastIndexOf(" ");
+    short = `${cut.slice(0, lastSpace > 40 ? lastSpace : 72).trimEnd()}…`;
+  }
+  return { title: short, body: full };
+}
+
 requestRoutes.post("/", async (c) => {
   const org = c.get("org");
   const user = c.get("user");
   const body = z
     .object({
-      title: z.string().min(1).max(500),
+      // one-box composers send the whole message as title; it gets split below
+      title: z.string().min(1).max(4000),
       body: z.string().max(20_000).default(""),
       channel: z.enum(["web", "mobile", "email", "api"]).default("web"),
       tags: z.array(z.string()).max(10).default([]),
@@ -114,6 +161,8 @@ requestRoutes.post("/", async (c) => {
     }
   }
 
+  const split = splitOneBoxMessage(body.title, body.body);
+
   const refNumber = await nextCounter(org.id, "request");
   const [request] = await db
     .insert(tables.requests)
@@ -122,8 +171,8 @@ requestRoutes.post("/", async (c) => {
       refNumber,
       authorId: author?.id ?? null,
       guestName: body.onBehalf?.guestName ?? null,
-      title: body.title,
-      body: body.body,
+      title: split.title,
+      body: split.body,
       channel: body.channel,
       tags: body.tags,
       // the supporter logging it is already handling it
@@ -255,8 +304,15 @@ requestRoutes.get("/", async (c) => {
     .orderBy(desc(tables.requests.lastActivityAt))
     .limit(Math.min(Number(q.limit ?? 100), 200));
 
-  // authors + claimers resolved in one shot for the queue cards
-  const userIds = [...new Set(rows.flatMap((r) => [r.authorId, r.claimedBy].filter(Boolean) as string[]))];
+  const lastMsgMap = await lastMessagesByRequest(rows.map((r) => r.id));
+
+  // authors + claimers + last-message senders resolved in one shot for the cards
+  const userIds = [
+    ...new Set([
+      ...rows.flatMap((r) => [r.authorId, r.claimedBy].filter(Boolean) as string[]),
+      ...[...lastMsgMap.values()].map((m) => m.authorId).filter(Boolean) as string[],
+    ]),
+  ];
   const people =
     userIds.length > 0
       ? await db.select(userCols).from(tables.users).where(inArray(tables.users.id, userIds))
@@ -264,11 +320,22 @@ requestRoutes.get("/", async (c) => {
   const byId = Object.fromEntries(people.map((p) => [p.id, p]));
 
   return c.json({
-    requests: rows.map((r) => ({
-      ...requestSummary(r),
-      author: r.authorId ? (byId[r.authorId] ?? null) : null,
-      claimer: r.claimedBy ? (byId[r.claimedBy] ?? null) : null,
-    })),
+    requests: rows.map((r) => {
+      const lm = lastMsgMap.get(r.id);
+      return {
+        ...requestSummary(r),
+        author: r.authorId ? (byId[r.authorId] ?? null) : null,
+        claimer: r.claimedBy ? (byId[r.claimedBy] ?? null) : null,
+        lastMessage: lm
+          ? {
+              authorName: lm.authorId ? (byId[lm.authorId]?.name ?? null) : null,
+              fromAi: lm.kind === "auto_answer",
+              body: lm.body,
+              createdAt: lm.createdAt,
+            }
+          : null,
+      };
+    }),
   });
 });
 
@@ -399,6 +466,8 @@ requestRoutes.get("/:id", async (c) => {
           trusted: r.trusted,
           linkedResolutionId: r.linkedResolutionId,
           articleId: r.articleId,
+          docState: r.docState,
+          docNote: r.docNote,
           createdAt: r.createdAt,
           supporterName: byId[r.supporterId]?.name ?? null,
           attachments: atts
@@ -809,6 +878,12 @@ requestRoutes.post("/:id/resolve", requireRole("supporter"), async (c) => {
     }
 
     await enqueue(QUEUES.structure, { resolutionId: resolution.id });
+    // surfaces the new "working" row in the AI activity feed right away
+    bus.publish(org.id, {
+      type: "ai_activity",
+      supporterOnly: true,
+      data: { resolutionId: resolution.id, requestId: request.id, state: "working" },
+    });
 
     if (linked) {
       // strong recurrence signal

@@ -4,6 +4,7 @@
  * typed wrapper over fetch.
  */
 import type {
+  AiActivityItem,
   ArticleListItem,
   ArticleView,
   AuthMethods,
@@ -248,6 +249,9 @@ export class KloopClient {
   // ---- reviews ----
   reviewCounts() {
     return this.get<{ counts: ReviewCounts }>("/api/reviews/counts");
+  }
+  aiActivity() {
+    return this.get<{ items: AiActivityItem[] }>("/api/reviews/activity");
   }
   reviews(kind?: string) {
     return this.get<{ items: ReviewListItem[] }>(`/api/reviews${kind ? `?kind=${kind}` : ""}`);

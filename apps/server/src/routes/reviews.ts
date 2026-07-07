@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray } from "drizzle-orm";
 import { db, tables } from "../db/index.js";
 import { requireAuth, requireRole } from "../http/middleware.js";
 import type { AppEnv } from "../http/context.js";
@@ -38,6 +38,73 @@ reviewRoutes.get("/counts", async (c) => {
   const counts = { draft: 0, update: 0, merge: 0, stale: 0, total: rows.length };
   for (const r of rows) counts[r.kind as keyof typeof counts]++;
   return c.json({ counts });
+});
+
+/**
+ * What the AI did (or is doing) with recent resolutions — the documentation
+ * pipeline made visible. One row per resolution, newest first.
+ */
+reviewRoutes.get("/activity", async (c) => {
+  const org = c.get("org");
+  const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+
+  const rows = await db
+    .select({
+      id: tables.resolutions.id,
+      requestId: tables.resolutions.requestId,
+      articleId: tables.resolutions.articleId,
+      docState: tables.resolutions.docState,
+      docNote: tables.resolutions.docNote,
+      createdAt: tables.resolutions.createdAt,
+      requestRefNumber: tables.requests.refNumber,
+      requestTitle: tables.requests.title,
+      supporterName: tables.users.name,
+    })
+    .from(tables.resolutions)
+    .innerJoin(tables.requests, eq(tables.requests.id, tables.resolutions.requestId))
+    .innerJoin(tables.users, eq(tables.users.id, tables.resolutions.supporterId))
+    .where(and(eq(tables.resolutions.orgId, org.id), gt(tables.resolutions.createdAt, since)))
+    .orderBy(desc(tables.resolutions.createdAt))
+    .limit(20);
+
+  // drafted rows link to their pending review item, if it's still in the inbox
+  const articleIds = rows.filter((r) => r.docState === "drafted" && r.articleId).map((r) => r.articleId as string);
+  const pendingItems =
+    articleIds.length > 0
+      ? await db
+          .select({ id: tables.reviewItems.id, articleId: tables.reviewItems.articleId })
+          .from(tables.reviewItems)
+          .where(
+            and(
+              eq(tables.reviewItems.orgId, org.id),
+              eq(tables.reviewItems.status, "pending"),
+              inArray(tables.reviewItems.articleId, articleIds),
+            ),
+          )
+      : [];
+  const reviewItemByArticle = new Map(pendingItems.map((i) => [i.articleId, i.id]));
+
+  const STALL_MS = 15 * 60 * 1000;
+  return c.json({
+    items: rows.map((r) => ({
+      id: r.id,
+      requestId: r.requestId,
+      requestRef: `REQ-${r.requestRefNumber}`,
+      requestTitle: r.requestTitle,
+      supporterName: r.supporterName,
+      createdAt: r.createdAt,
+      // a pipeline stuck in "working" past any plausible runtime is dead —
+      // report it instead of showing an eternal spinner
+      state:
+        r.docState === "working" && Date.now() - r.createdAt.getTime() > STALL_MS ? "failed" : r.docState,
+      note:
+        r.docState === "working" && Date.now() - r.createdAt.getTime() > STALL_MS
+          ? "This one never finished — the capture is saved."
+          : r.docNote,
+      articleId: r.articleId,
+      reviewItemId: r.articleId ? (reviewItemByArticle.get(r.articleId) ?? null) : null,
+    })),
+  });
 });
 
 /** Review inbox: drafts / updates / merges (+ stale flags), hydrated. */

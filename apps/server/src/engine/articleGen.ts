@@ -6,9 +6,45 @@ import { createArticleWithRevision, type BlockInput } from "./articles.js";
 import { recordEvent } from "../lib/events.js";
 import { threadTranscript } from "../lib/thread.js";
 import { notifySupportersOfReviewItem } from "./reviewNotify.js";
+import { bus } from "../realtime/bus.js";
 import { logger } from "../lib/logger.js";
 
 const ALREADY_DOCUMENTED_SIMILARITY = 0.86;
+
+/**
+ * Terminal state of the documentation pipeline for one resolution — this is
+ * what the "AI activity" feed and the thread status line render. Every exit
+ * path of considerArticleGeneration must land on one of these, otherwise the
+ * supporter is left staring at a spinner.
+ */
+async function settleDocState(
+  resolution: { id: string; orgId: string; requestId: string },
+  state: "drafted" | "already_documented" | "covered_by_draft" | "skipped" | "failed",
+  note: string | null,
+): Promise<void> {
+  await db.update(tables.resolutions).set({ docState: state, docNote: note }).where(eq(tables.resolutions.id, resolution.id));
+  await recordEvent(resolution.orgId, "ai", null, "doc_pipeline_settled", {
+    resolutionId: resolution.id,
+    requestId: resolution.requestId,
+    state,
+    note,
+  });
+  bus.publish(resolution.orgId, {
+    type: "ai_activity",
+    supporterOnly: true,
+    data: { resolutionId: resolution.id, requestId: resolution.requestId, state },
+  });
+}
+
+/** "KB-041 · VPN drops on hotel Wi-Fi" for the matched-existing-article note. */
+async function articleLabel(articleId: string): Promise<string> {
+  const article = await db.query.articles.findFirst({ where: eq(tables.articles.id, articleId) });
+  if (!article) return "an existing article";
+  const kb = `KB-${String(article.kbNumber).padStart(3, "0")}`;
+  if (!article.currentRevisionId) return kb;
+  const rev = await db.query.articleRevisions.findFirst({ where: eq(tables.articleRevisions.id, article.currentRevisionId) });
+  return rev ? `${kb} · ${rev.title}` : kb;
+}
 
 type DraftJson = {
   title: string;
@@ -31,6 +67,20 @@ export async function considerArticleGeneration(resolutionId: string): Promise<v
   const request = await db.query.requests.findFirst({ where: eq(tables.requests.id, resolution.requestId) });
   if (!request) return;
 
+  try {
+    await generate(resolution, request);
+  } catch (err) {
+    logger.error("article generation failed", { resolutionId, err: String(err) });
+    await settleDocState(resolution, "failed", "Something went wrong while writing this up — the capture is saved.").catch(() => {});
+    throw err;
+  }
+}
+
+async function generate(
+  resolution: typeof tables.resolutions.$inferSelect,
+  request: typeof tables.requests.$inferSelect,
+): Promise<void> {
+  const resolutionId = resolution.id;
   const queryText = `${request.title}\n${resolution.structuredSummary ?? resolution.rawCaptureText}`;
 
   // 1. already documented? (vector similarity against published articles)
@@ -40,6 +90,7 @@ export async function considerArticleGeneration(resolutionId: string): Promise<v
     // documented — link resolution to the article; freshness scan will decide
     // if the new resolution contradicts it.
     await db.update(tables.resolutions).set({ articleId: best.id }).where(eq(tables.resolutions.id, resolutionId));
+    await settleDocState(resolution, "already_documented", `Covered by ${await articleLabel(best.id)} — no new doc needed.`);
     return;
   }
 
@@ -71,7 +122,10 @@ export async function considerArticleGeneration(resolutionId: string): Promise<v
   if (pendingDrafts.length > 0) {
     const draftArticleIds = pendingDrafts.map((d) => d.articleId).filter(Boolean) as string[];
     const covered = sources.some((s) => s.articleId && draftArticleIds.includes(s.articleId));
-    if (covered) return;
+    if (covered) {
+      await settleDocState(resolution, "covered_by_draft", "A draft already in review covers this — nothing new created.");
+      return;
+    }
   }
 
   // 4. draft it
@@ -120,6 +174,7 @@ export async function considerArticleGeneration(resolutionId: string): Promise<v
     draft = extractJson<DraftJson>(raw);
   } catch (err) {
     logger.error("article draft JSON parse failed", { resolutionId, err: String(err) });
+    await settleDocState(resolution, "failed", "Draft generation failed — the capture is saved and can feed a future draft.");
     return;
   }
 
@@ -135,7 +190,10 @@ export async function considerArticleGeneration(resolutionId: string): Promise<v
         ...requests.map((r) => ({ kind: "request" as const, id: r.id })),
       ],
     }));
-  if (blocks.length === 0) return;
+  if (blocks.length === 0) {
+    await settleDocState(resolution, "skipped", "Not enough substance to document — the capture is saved as a precedent.");
+    return;
+  }
 
   const confidence = Math.max(0.1, Math.min(1, draft.confidence ?? 0.4 + sources.length * 0.15));
   const { article, revision } = await createArticleWithRevision({
@@ -175,5 +233,6 @@ export async function considerArticleGeneration(resolutionId: string): Promise<v
     sourceResolutions: sources.length,
     confidence,
   });
+  await settleDocState(resolution, "drafted", `Draft "${draft.title || request.title}" is ready for review.`);
   await notifySupportersOfReviewItem(request.orgId, `New article draft: ${draft.title || request.title}`, item.id);
 }

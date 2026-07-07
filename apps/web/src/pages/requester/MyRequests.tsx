@@ -3,20 +3,28 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { RequestSummary } from "@kloop/shared";
 import { api } from "../../lib/api";
-import { sentLabel, dateLabel } from "../../lib/format";
+import { dateLabel, timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
-import { Card, EmptyState, ErrorState, SectionLabel, Spinner, StatusBadge } from "../../ui";
+import { Card, Divider, EmptyState, ErrorState, GroupedCard, PastRow, ReplyPreview, SectionLabel, Spinner, StatusLine } from "../../ui";
 
 export function MyRequestsPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ["requests", "mine"], queryFn: () => api.requests() });
 
   const open = (data?.requests ?? []).filter((r) => r.status !== "solved");
   const solved = (data?.requests ?? []).filter((r) => r.status === "solved");
+  const waiting = open.filter((r) => r.unreadForRequester).length;
 
   return (
     <div className="mx-auto w-full max-w-xl px-4 pt-6 md:pt-10">
       <PageHeader title={t("nav.myRequests")} />
+      {open.length > 0 && (
+        <p className="-mt-4 mb-6 text-[14px] text-ink-secondary">
+          {open.length} open
+          {waiting > 0 ? ` · ${waiting} repl${waiting > 1 ? "ies" : "y"} waiting for you` : ""}
+        </p>
+      )}
       {error && !data ? (
         <ErrorState message={(error as Error).message} onRetry={() => void refetch()} />
       ) : isLoading ? (
@@ -28,23 +36,27 @@ export function MyRequestsPage() {
       ) : (
         <>
           {open.length > 0 && (
-            <>
-              <SectionLabel className="mb-2.5 px-1">Open</SectionLabel>
-              <div className="mb-7 flex flex-col gap-2.5">
-                {open.map((r) => (
-                  <RequestRow key={r.id} r={r} />
-                ))}
-              </div>
-            </>
+            <div className="mb-7 flex flex-col gap-2.5">
+              {open.map((r) => (
+                <OpenCard key={r.id} r={r} />
+              ))}
+            </div>
           )}
           {solved.length > 0 && (
             <>
-              <SectionLabel className="mb-2.5 px-1">Solved</SectionLabel>
-              <div className="flex flex-col gap-2.5">
-                {solved.map((r) => (
-                  <RequestRow key={r.id} r={r} />
+              <SectionLabel className="mb-2.5 px-1">Past</SectionLabel>
+              <GroupedCard>
+                {solved.map((r, i) => (
+                  <div key={r.id}>
+                    {i > 0 && <Divider />}
+                    <PastRow
+                      title={r.title}
+                      subtitle={r.selfSolvedArticleId ? `Self-solved ${dateLabel(r.solvedAt)}` : `Solved ${dateLabel(r.solvedAt)}`}
+                      onClick={() => navigate(`/requests/${r.id}`)}
+                    />
+                  </div>
                 ))}
-              </div>
+              </GroupedCard>
             </>
           )}
         </>
@@ -53,27 +65,20 @@ export function MyRequestsPage() {
   );
 }
 
-function RequestRow({ r }: { r: RequestSummary }) {
+function OpenCard({ r }: { r: RequestSummary }) {
   const navigate = useNavigate();
-  const sub = subline(r);
+  const meta = r.status === "handled" ? `updated ${timeAgo(r.lastActivityAt)} ago` : "waiting for a supporter";
   return (
-    <Card as="button" onClick={() => navigate(`/requests/${r.id}`)} className="flex items-center gap-3 p-4">
-      <span className="min-w-0 flex-1">
-        <span className={`block leading-snug ${r.unreadForRequester ? "font-bold" : "font-semibold"} text-ink`}>{r.title}</span>
-        <span className="mt-0.5 block text-[13px] text-ink-secondary">{sub}</span>
-      </span>
-      <StatusBadge status={r.status} />
+    <Card as="button" onClick={() => navigate(`/requests/${r.id}`)} className="p-4">
+      <StatusLine status={r.status === "handled" ? "handled" : "open"} meta={meta} />
+      <span className="mt-1.5 block text-[16px] font-extrabold leading-snug text-ink">{r.title}</span>
+      {r.lastMessage && (
+        <ReplyPreview
+          name={r.lastMessage.fromAi ? "kloop" : (r.lastMessage.authorName ?? "Reply")}
+          body={r.lastMessage.body}
+          unread={r.unreadForRequester}
+        />
+      )}
     </Card>
   );
-}
-
-function subline(r: RequestSummary): string {
-  if (r.status === "solved") {
-    if (r.selfSolvedArticleId) return `Self-solved ${dateLabel(r.solvedAt)} · from suggested article`;
-    if (r.confirmationState === "confirmed") return `Solved ${dateLabel(r.solvedAt)} · you confirmed the fix`;
-    return `Solved ${dateLabel(r.solvedAt)}`;
-  }
-  const base = `Sent ${sentLabel(r.createdAt)}`;
-  if (r.unreadForRequester) return `${base} · new reply`;
-  return base;
 }
