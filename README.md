@@ -179,6 +179,34 @@ docker compose exec api node dist/cli.js admin create   # fresh company + admin
 docker compose exec api node dist/cli.js doctor         # verify everything after
 ```
 
+### Database backup & restore (prod ↔ local)
+
+Snapshot and restore the app data of any kloop database from your machine — take a safety copy of prod before testing something, pull prod data into local dev, or roll back after an experiment. Requires the Postgres client tools on the host (`brew install libpq && brew link --force libpq`).
+
+```bash
+pnpm db:backup  <prod|local|URL> [--out FILE]     # dump into backups/ (gitignored)
+pnpm db:restore <prod|local|URL> <file> [--yes]   # REPLACE app data (asks for confirmation)
+```
+
+Targets: `prod` reads `DATABASE_URL` from `.env.sevalla`, `local` from `.env` (falling back to the compose dev DB on `:5433`), or pass a raw `postgres://` URL.
+
+```bash
+# safety copy of prod, test whatever you want, then roll it back
+pnpm db:backup prod
+pnpm db:restore prod backups/kloop-prod-<stamp>.dump
+
+# pull prod data into local dev
+pnpm db:backup prod && pnpm db:restore local backups/kloop-prod-<stamp>.dump
+```
+
+What's in a snapshot — and deliberately not:
+
+- **Included:** the `public` schema (all app data) + the `drizzle` migration journal, so a restored snapshot always agrees with its migrations.
+- **Excluded:** the `pgboss` job queue — restoring prod's queue locally would make your dev server execute leftover prod jobs (queued emails!). It's wiped on restore and recreated empty when the server boots, so **restart the server after a restore**. On Supabase the platform-managed schemas (`auth`, `storage`, extensions) are never touched.
+- **No uploads:** file attachments live outside the DB (prod's on the Sevalla disk). For a full archive including uploads use `kloop backup` / `kloop restore` from the server CLI instead (runs where the server runs, e.g. `docker compose exec api node dist/cli.js backup`).
+
+A restore runs as a single transaction: it either completes fully or rolls back leaving the target unchanged.
+
 ### Mobile app
 
 ```bash

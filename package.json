@@ -18,6 +18,8 @@
     "typecheck": "turbo typecheck",
     "db:generate": "pnpm --filter @kloop/server db:generate",
     "db:migrate": "pnpm --filter @kloop/server db:migrate",
+    "db:backup": "node scripts/db.mjs backup",
+    "db:restore": "node scripts/db.mjs restore",
     "seed": "pnpm --filter @kloop/server kloop seed"
   },
   "devDependencies": {

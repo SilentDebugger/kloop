@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { colors } from "@kloop/shared";
+import { haptics } from "../src/haptics";
 import { Button } from "../src/ui";
 
 /** Scan the workspace QR (shown in the web admin's Integrations page). */
@@ -39,6 +40,7 @@ export default function QrScanScreen() {
           if (handled.current || locked) return;
           handled.current = true;
           setLocked(true);
+          haptics.success();
           router.replace({ pathname: "/connect", params: { scanned: data } });
         }}
       />

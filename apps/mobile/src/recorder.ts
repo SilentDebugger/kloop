@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AudioModule, RecordingPresets, useAudioRecorder } from "expo-audio";
+import { haptics } from "./haptics";
 import type { Picked } from "./uploads";
 
 /** Voice-note recorder for the composer and resolution capture. */
@@ -17,6 +18,8 @@ export function useVoiceNote() {
       await recorder.prepareToRecordAsync();
       recorder.record();
       setRecording(true);
+      // confirms the recording actually started, not just the button press
+      haptics.medium();
       return true;
     } catch {
       setRecording(false);

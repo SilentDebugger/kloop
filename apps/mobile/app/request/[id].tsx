@@ -23,6 +23,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { autoAnswerSkipLabel, colors, docStateLabel, radii, type DeflectionSuggestion, type MessageView, type RequestDetail, type RequestSummary, type ResolutionView } from "@kloop/shared";
 import { api } from "../../src/api";
 import { clockTime, sentLabel } from "../../src/format";
+import { haptics } from "../../src/haptics";
 import { useActiveWorkspace } from "../../src/store/connection";
 import { pickImage, uploadFile } from "../../src/uploads";
 import { useVoiceNote } from "../../src/recorder";
@@ -298,11 +299,17 @@ function RequesterThread({ detail }: { detail: RequestDetail }) {
 
   const confirm = useMutation({
     mutationFn: (fixed: boolean) => api.confirm(request.id, fixed),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["request", request.id] }),
+    onSuccess: (_res, fixed) => {
+      if (fixed) haptics.success();
+      void qc.invalidateQueries({ queryKey: ["request", request.id] });
+    },
   });
   const reopen = useMutation({
     mutationFn: () => api.reopen(request.id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["request", request.id] }),
+    onSuccess: () => {
+      haptics.warning();
+      void qc.invalidateQueries({ queryKey: ["request", request.id] });
+    },
   });
 
   const reached = request.status === "solved" ? 2 : request.status === "handled" ? 1 : 0;
@@ -406,9 +413,11 @@ function Workbench({ detail }: { detail: RequestDetail }) {
   const claim = useMutation({
     mutationFn: () => api.claim(request.id),
     onSuccess: () => {
+      haptics.success();
       void qc.invalidateQueries({ queryKey: ["request", request.id] });
       void qc.invalidateQueries({ queryKey: ["requests"] });
     },
+    onError: () => haptics.error(),
   });
 
   const similar = precedents?.similarSolved ?? [];
@@ -680,6 +689,7 @@ function Composer({
       setNote(false);
       void qc.invalidateQueries({ queryKey: ["request", requestId] });
     },
+    onError: () => haptics.error(),
   });
 
   const attach = async () => {
@@ -763,7 +773,13 @@ function Composer({
           elevation: 4,
         }}
       >
-        <Pressable onPress={() => void attach()} disabled={uploading}>
+        <Pressable
+          onPress={() => {
+            haptics.tap();
+            void attach();
+          }}
+          disabled={uploading}
+        >
           <GlassSurface interactive fallbackColor={colors.chip} style={roundBtn()}>
             {uploading ? (
               <ActivityIndicator size="small" color={colors.textSecondary} />
@@ -772,7 +788,12 @@ function Composer({
             )}
           </GlassSurface>
         </Pressable>
-        <Pressable onPress={() => void toggleVoice()}>
+        <Pressable
+          onPress={() => {
+            haptics.tap();
+            void toggleVoice();
+          }}
+        >
           <GlassSurface
             interactive
             fallbackColor={colors.chip}
@@ -804,7 +825,10 @@ function Composer({
           }}
         />
         <Pressable
-          onPress={() => send.mutate()}
+          onPress={() => {
+            haptics.tap();
+            send.mutate();
+          }}
           disabled={!canSend}
           style={[roundBtn(), { backgroundColor: colors.primary, opacity: canSend ? 1 : 0.4 }]}
         >

@@ -15,6 +15,7 @@ import {
 import Svg, { Circle } from "react-native-svg";
 import { SymbolView } from "expo-symbols";
 import { colors, radii, type DocState } from "@kloop/shared";
+import { haptics } from "../haptics";
 import { GlassSurface } from "./glass";
 
 export { GlassSurface, liquidGlass } from "./glass";
@@ -55,6 +56,12 @@ export function Button({
   style?: StyleProp<ViewStyle>;
   icon?: ReactNode;
 }) {
+  const press = onPress
+    ? () => {
+        haptics.tap();
+        onPress();
+      }
+    : undefined;
   const fg =
     variant === "primary" ? colors.onPrimary : variant === "danger" ? colors.danger : variant === "mint" ? colors.primary : colors.text;
   const pad = size === "sm" ? { paddingVertical: 7, paddingHorizontal: 14 } : size === "lg" ? { paddingVertical: 14, paddingHorizontal: 20 } : { paddingVertical: 11, paddingHorizontal: 18 };
@@ -77,7 +84,7 @@ export function Button({
   if (variant === "secondary" || variant === "outline") {
     return (
       <Pressable
-        onPress={onPress}
+        onPress={press}
         disabled={disabled || loading}
         style={({ pressed }) => [{ borderRadius: radii.pill, opacity: disabled ? 0.5 : pressed ? 0.85 : 1 }, style]}
       >
@@ -91,7 +98,7 @@ export function Button({
   const bg = variant === "primary" ? colors.primary : variant === "mint" ? colors.mint : colors.card;
   return (
     <Pressable
-      onPress={onPress}
+      onPress={press}
       disabled={disabled || loading}
       style={({ pressed }) => [
         {
@@ -149,7 +156,14 @@ export function Chip({
 }) {
   return (
     <Pressable
-      onPress={onPress}
+      onPress={
+        onPress
+          ? () => {
+              haptics.select();
+              onPress();
+            }
+          : undefined
+      }
       disabled={!onPress}
       style={({ pressed }) => [{ borderRadius: radii.pill, opacity: pressed ? 0.85 : 1 }, style]}
     >
@@ -373,7 +387,10 @@ export function Segmented<T extends string>({
       {options.map((o) => (
         <Pressable
           key={o.value}
-          onPress={() => onChange(o.value)}
+          onPress={() => {
+            if (o.value !== value) haptics.select();
+            onChange(o.value);
+          }}
           style={{
             backgroundColor: o.value === value ? colors.card : "transparent",
             borderRadius: radii.pill,

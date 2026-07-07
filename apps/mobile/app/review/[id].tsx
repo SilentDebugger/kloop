@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { colors, radii } from "@kloop/shared";
 import { api } from "../../src/api";
+import { haptics } from "../../src/haptics";
 import { Button, Card, GlassSurface, SectionLabel, Spinner } from "../../src/ui";
 import { MarkdownLite } from "../../src/ui/MarkdownLite";
 
@@ -34,8 +35,22 @@ export default function ReviewDetailScreen() {
     void qc.invalidateQueries({ queryKey: ["articles"] });
     router.back();
   };
-  const approve = useMutation({ mutationFn: () => api.approveReview(id), onSuccess: done });
-  const reject = useMutation({ mutationFn: () => api.rejectReview(id), onSuccess: done });
+  const approve = useMutation({
+    mutationFn: () => api.approveReview(id),
+    onSuccess: () => {
+      haptics.success();
+      done();
+    },
+    onError: () => haptics.error(),
+  });
+  const reject = useMutation({
+    mutationFn: () => api.rejectReview(id),
+    onSuccess: () => {
+      haptics.warning();
+      done();
+    },
+    onError: () => haptics.error(),
+  });
 
   if (isLoading || !data) {
     return (
@@ -144,10 +159,12 @@ function SimilarArticles({
   const merge = useMutation({
     mutationFn: (articleId: string) => api.reviewMergeInto(reviewId, articleId),
     onSuccess: () => {
+      haptics.success();
       Alert.alert("Merge proposed", "A merge proposal was created — you'll find it in the Merges tab.");
       onDone();
     },
     onError: (err) => {
+      haptics.error();
       setMergingId(null);
       Alert.alert("Couldn't propose merge", err instanceof Error ? err.message : "Something went wrong.");
     },

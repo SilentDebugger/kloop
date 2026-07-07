@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { useMutation } from "@tanstack/react-query";
 import { colors } from "@kloop/shared";
 import { api } from "../api";
+import { haptics } from "../haptics";
 import { unregisterPush } from "../push";
 import { useConnection } from "../store/connection";
 import { Avatar, Button, Card, PageTitle, SectionLabel } from "../ui";
@@ -32,8 +33,13 @@ export function SettingsScreen() {
     mutationFn: (prefs: Record<string, boolean>) => api.updateProfile({ notificationPrefs: prefs }),
     onSuccess: (res) => setUser(res.user),
   });
+  const togglePref = (key: string, v: boolean, prefs: Record<string, boolean>) => {
+    haptics.select();
+    updatePrefs.mutate({ ...prefs, [key]: v });
+  };
 
   const signOut = async () => {
+    haptics.warning();
     // best-effort cleanup while the session is still valid, hard-capped so a
     // dead/unreachable workspace can never trap the user on this screen
     await Promise.race([
@@ -84,7 +90,7 @@ export function SettingsScreen() {
               <Text style={{ fontSize: 15, fontWeight: "500", color: colors.text }}>{p.label}</Text>
               <Switch
                 value={prefs[p.key] !== false}
-                onValueChange={(v) => updatePrefs.mutate({ ...prefs, [p.key]: v })}
+                onValueChange={(v) => togglePref(p.key, v, prefs)}
                 trackColor={{ true: colors.primary, false: colors.border }}
                 thumbColor="#fff"
               />
@@ -115,7 +121,7 @@ export function SettingsScreen() {
               </View>
               <Switch
                 value={prefs[ch.key] ?? ch.default}
-                onValueChange={(v) => updatePrefs.mutate({ ...prefs, [ch.key]: v })}
+                onValueChange={(v) => togglePref(ch.key, v, prefs)}
                 trackColor={{ true: colors.primary, false: colors.border }}
                 thumbColor="#fff"
               />
@@ -132,6 +138,7 @@ export function SettingsScreen() {
               key={`${w.origin}-${w.slug}`}
               onPress={() => {
                 if (i !== activeIndex) {
+                  haptics.select();
                   setActive(i);
                   const nextUser = workspaces[i]?.user;
                   router.replace(!workspaces[i]?.token ? "/login" : nextUser?.role === "requester" ? "/(requester)" : "/(supporter)/queue");

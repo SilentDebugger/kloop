@@ -19,6 +19,10 @@ apps/server/static/
 data/
 *.local
 
+# database dumps (contain real data)
+backups/
+*.dump
+
 # logs
 *.log
 npm-debug.log*

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { fetch } from "expo/fetch";
 import { File } from "expo-file-system";
+import { haptics } from "./haptics";
 import { activeWorkspace } from "./store/connection";
 import { useVoiceNote } from "./recorder";
 import type { LocalAttachment } from "./ui/attachments";
@@ -30,9 +31,10 @@ export async function uploadFile(file: Picked): Promise<{ id: string; filename: 
 }
 
 /**
- * Camera / photo-library / voice-note capture + upload, with the pending list
- * kept for previews. One hook shared by every composer that takes attachments
- * (home one-box, chat reply, new-request sheet, search, article editor).
+ * Camera / photo-library / voice-note / document capture + upload, with the
+ * pending list kept for previews. One hook shared by every composer that
+ * takes attachments (home one-box, chat reply, new-request sheet, search,
+ * article editor).
  */
 export function useComposerAttachments() {
   const voice = useVoiceNote();
@@ -40,7 +42,7 @@ export function useComposerAttachments() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const attach = async (kind: "camera" | "photo" | "voice") => {
+  const attach = async (kind: "camera" | "photo" | "voice" | "file") => {
     setError(null);
     try {
       if (kind === "voice") {
@@ -56,13 +58,14 @@ export function useComposerAttachments() {
         }
         return;
       }
-      const picked = await pickImage(kind === "camera");
+      const picked = kind === "file" ? await pickDocument() : await pickImage(kind === "camera");
       if (picked) {
         setUploading(true);
         const a = await uploadFile(picked);
         setAttachments((x) => [...x, { id: a.id, filename: a.filename, kind: a.kind, localUri: picked.uri }]);
       }
     } catch (err) {
+      haptics.error();
       setError(err instanceof Error ? err.message : "Upload failed — try again.");
     } finally {
       setUploading(false);
@@ -79,6 +82,18 @@ export function useComposerAttachments() {
     attach,
     remove: (id: string) => setAttachments((x) => x.filter((y) => y.id !== id)),
     clear: () => setAttachments([]),
+  };
+}
+
+export async function pickDocument(): Promise<Picked | null> {
+  const DocumentPicker = await import("expo-document-picker");
+  const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+  const asset = result.assets?.[0];
+  if (result.canceled || !asset) return null;
+  return {
+    uri: asset.uri,
+    name: asset.name ?? `file-${Date.now()}`,
+    type: asset.mimeType ?? "application/octet-stream",
   };
 }
 

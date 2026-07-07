@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { colors, type RequestSummary } from "@kloop/shared";
 import { api } from "../../src/api";
 import { timeAgo } from "../../src/format";
+import { haptics } from "../../src/haptics";
 import { useActiveWorkspace } from "../../src/store/connection";
 import { Avatar, Button, Card, Chip, EmptyState, PageTitle, ReplyPreview, Segmented, Spinner, StatusLine } from "../../src/ui";
 
@@ -51,7 +52,10 @@ export default function QueueScreen() {
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             {/* log a request for a user or guest */}
             <Pressable
-              onPress={() => router.push("/new-request")}
+              onPress={() => {
+                haptics.tap();
+                router.push("/new-request");
+              }}
               style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: colors.mint, alignItems: "center", justifyContent: "center" }}
             >
               <SymbolView name={{ ios: "plus", android: "add" }} size={17} weight="semibold" tintColor={colors.primary} />
@@ -108,9 +112,11 @@ function QueueCard({ r }: { r: RequestSummary }) {
   const claim = useMutation({
     mutationFn: () => api.claim(r.id),
     onSuccess: (res) => {
+      haptics.success();
       void qc.invalidateQueries({ queryKey: ["requests"] });
       router.push(`/request/${res.request.id}`);
     },
+    onError: () => haptics.error(),
   });
 
   const requesterName = r.author?.name ?? (r.guestName ? `${r.guestName} (guest)` : "Guest");

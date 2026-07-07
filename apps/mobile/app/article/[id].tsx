@@ -6,6 +6,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { colors, radii, type ArticleBlockView } from "@kloop/shared";
 import { api } from "../../src/api";
 import { timeAgo } from "../../src/format";
+import { haptics } from "../../src/haptics";
 import { useDrafts } from "../../src/store/drafts";
 import { Button, Card, Chip, GlassSurface, SectionLabel, Spinner } from "../../src/ui";
 import { RemoteAttachments } from "../../src/ui/attachments";
@@ -43,6 +44,7 @@ export default function ArticleScreen() {
   const solved = useMutation({
     mutationFn: () => api.selfSolve({ title: draftTitle || `Self-solved via ${data?.article.kb}`, articleId: params.id }),
     onSuccess: (res) => {
+      haptics.success();
       setComposerText("");
       router.replace(`/request/${res.request.id}`);
     },

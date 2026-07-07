@@ -7,6 +7,7 @@ import { colors, docStateLabel, type AiActivityItem, type ReviewListItem } from 
 import { SymbolView } from "expo-symbols";
 import { api } from "../../src/api";
 import { timeAgo } from "../../src/format";
+import { haptics } from "../../src/haptics";
 import { useActiveWorkspace } from "../../src/store/connection";
 import { AiGlyph, Button, Card, Divider, EmptyState, GroupedCard, KindBadge, PageTitle, SectionLabel, Segmented, Spinner } from "../../src/ui";
 
@@ -137,8 +138,22 @@ function ReviewCard({ item }: { item: ReviewListItem }) {
     void qc.invalidateQueries({ queryKey: ["reviews"] });
     void qc.invalidateQueries({ queryKey: ["review-counts"] });
   };
-  const approve = useMutation({ mutationFn: () => api.approveReview(item.id), onSuccess: invalidate });
-  const reject = useMutation({ mutationFn: () => api.rejectReview(item.id), onSuccess: invalidate });
+  const approve = useMutation({
+    mutationFn: () => api.approveReview(item.id),
+    onSuccess: () => {
+      haptics.success();
+      invalidate();
+    },
+    onError: () => haptics.error(),
+  });
+  const reject = useMutation({
+    mutationFn: () => api.rejectReview(item.id),
+    onSuccess: () => {
+      haptics.warning();
+      invalidate();
+    },
+    onError: () => haptics.error(),
+  });
 
   const confidenceLabel = item.confidence >= 0.75 ? "high confidence" : item.confidence >= 0.45 ? "medium confidence" : "low confidence";
   const title = item.kind === "stale" ? `${item.kb} · ${item.title ?? "Article"}` : (item.title ?? "Untitled draft");

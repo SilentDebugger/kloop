@@ -7,6 +7,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { colors, radii, type DeflectionSuggestion } from "@kloop/shared";
 import { api } from "../../src/api";
+import { haptics } from "../../src/haptics";
 import { useDrafts } from "../../src/store/drafts";
 import { useActiveWorkspace } from "../../src/store/connection";
 import { useComposerAttachments } from "../../src/uploads";
@@ -58,6 +59,7 @@ export default function HomeScreen() {
   const send = useMutation({
     mutationFn: () => api.createRequest({ title: text.trim(), channel: "mobile", attachmentIds: att.ids }),
     onSuccess: (res) => {
+      haptics.success();
       setText("");
       setComposerText("");
       att.clear();
@@ -65,6 +67,7 @@ export default function HomeScreen() {
     },
     onError: () => {
       // offline: queue the draft and sync later
+      haptics.warning();
       useDrafts.getState().enqueue(text.trim());
       setText("");
       setComposerText("");
@@ -195,7 +198,10 @@ export default function HomeScreen() {
               />
               <View style={{ flex: 1 }} />
               <Pressable
-                onPress={() => send.mutate()}
+                onPress={() => {
+                  haptics.tap();
+                  send.mutate();
+                }}
                 disabled={!canSend}
                 style={{
                   height: 40,
@@ -335,7 +341,10 @@ function RoundAction({
 }) {
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        haptics.tap();
+        onPress();
+      }}
       style={{
         width: 40,
         height: 40,

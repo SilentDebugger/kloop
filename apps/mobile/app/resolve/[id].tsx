@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { colors, radii } from "@kloop/shared";
 import { api } from "../../src/api";
+import { haptics } from "../../src/haptics";
 import { useVoiceNote } from "../../src/recorder";
 import { pickImage, uploadFile } from "../../src/uploads";
 import { Button, Chip, Logo, SectionLabel } from "../../src/ui";
@@ -47,10 +48,12 @@ export default function ResolveScreen() {
         skipCapture: skip && !text.trim() && !linked && attachments.length === 0,
       }),
     onSuccess: () => {
+      haptics.success();
       void qc.invalidateQueries({ queryKey: ["request", id] });
       void qc.invalidateQueries({ queryKey: ["requests"] });
       router.back();
     },
+    onError: () => haptics.error(),
   });
 
   const attach = async (kind: "photo" | "voice") => {
@@ -115,7 +118,10 @@ export default function ResolveScreen() {
       />
 
       <Pressable
-        onPress={() => genDraft.mutate()}
+        onPress={() => {
+          haptics.tap();
+          genDraft.mutate();
+        }}
         disabled={genDraft.isPending}
         style={{
           flexDirection: "row",
@@ -179,7 +185,10 @@ export default function ResolveScreen() {
             return (
               <Pressable
                 key={r.id}
-                onPress={() => setLinked(active ? null : r.id)}
+                onPress={() => {
+                  haptics.select();
+                  setLinked(active ? null : r.id);
+                }}
                 style={{
                   flexDirection: "row",
                   alignItems: "center",

@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import { ApiError } from "@kloop/shared";
 import { colors } from "@kloop/shared";
 import { api } from "../src/api";
+import { haptics } from "../src/haptics";
 import { registerPush } from "../src/push";
 import { useActiveWorkspace, useConnection } from "../src/store/connection";
 import { Button, Card, ErrorNote, Input } from "../src/ui";
@@ -28,6 +29,7 @@ export default function LoginScreen() {
   const effectiveMode = mode ?? (ws.auth.magicLink ? "magic" : "password");
 
   const finishLogin = (token: string, user: Parameters<typeof setSession>[1]) => {
+    haptics.success();
     setSession(token, user);
     void registerPush();
     router.replace(user.role === "requester" ? "/(requester)" : "/(supporter)/queue");
@@ -39,12 +41,14 @@ export default function LoginScreen() {
     try {
       if (effectiveMode === "magic") {
         await api.requestMagicLink(email.trim());
+        haptics.success();
         setSent(true);
       } else {
         const res = await api.login(email.trim(), password);
         finishLogin(res.token, res.user);
       }
     } catch (e) {
+      haptics.error();
       setError(e instanceof ApiError ? e.message : "Something went wrong — try again.");
     } finally {
       setBusy(false);
