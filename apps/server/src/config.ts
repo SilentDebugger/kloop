@@ -44,7 +44,21 @@ const envSchema = z.object({
   SMTP_SECURE: z.coerce.boolean().default(false),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
-  MAIL_FROM: z.string().default("kloop <kloop@localhost>"),
+  /**
+   * When set, mail goes out via the Resend HTTPS API instead of SMTP.
+   * PaaS hosts (Sevalla, Heroku, ...) block outbound SMTP ports entirely —
+   * HTTPS on 443 always works.
+   */
+  RESEND_API_KEY: z.string().optional(),
+  // PaaS env dashboards store values literally — strip the surrounding quotes
+  // people naturally paste from .env files ("kloop <a@b.c>" breaks Resend's API)
+  MAIL_FROM: z
+    .string()
+    .default("kloop <kloop@localhost>")
+    .transform((v) => {
+      const t = v.trim();
+      return t.startsWith('"') && t.endsWith('"') ? t.slice(1, -1).trim() : t;
+    }),
   EMAIL_IN_SECRET: z.string().optional(),
 
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),

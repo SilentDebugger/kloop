@@ -234,5 +234,9 @@ async function generate(
     confidence,
   });
   await settleDocState(resolution, "drafted", `Draft "${draft.title || request.title}" is ready for review.`);
-  await notifySupportersOfReviewItem(request.orgId, `New article draft: ${draft.title || request.title}`, item.id);
+  // only the supporters whose resolutions fed the draft — it's their fix,
+  // and org-wide pings for every draft would train people to ignore them
+  await notifySupportersOfReviewItem(request.orgId, `Your fix became a draft: ${draft.title || request.title}`, item.id, {
+    onlyUserIds: supporterIds,
+  });
 }

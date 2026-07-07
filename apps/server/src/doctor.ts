@@ -91,7 +91,16 @@ export async function runDoctor(): Promise<boolean> {
   );
 
   results.push(
-    await check("smtp", async () => {
+    await check("mail", async () => {
+      if (config.RESEND_API_KEY) {
+        // key validation without sending: Resend rejects bad keys with 401
+        const res = await fetch("https://api.resend.com/domains", {
+          headers: { authorization: `Bearer ${config.RESEND_API_KEY}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) throw new Error(`resend api key rejected (${res.status})`);
+        return "resend api reachable, key valid";
+      }
       const { getMailer } = await import("./lib/mail.js");
       await getMailer().verify();
       return `${config.SMTP_HOST}:${config.SMTP_PORT} reachable`;
