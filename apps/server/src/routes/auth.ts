@@ -93,7 +93,9 @@ authRoutes.post("/magic-link", async (c) => {
       tokenHash: hashToken(token),
       expiresAt: new Date(Date.now() + MAGIC_LINK_MINUTES * 60 * 1000),
     });
-    const url = `${config.PUBLIC_URL}/auth/verify?token=${encodeURIComponent(token)}`;
+    // `server` lets the mobile app bootstrap the right workspace when the
+    // link opens as a universal link / deep link; the web page ignores it
+    const url = `${config.PUBLIC_URL}/auth/verify?token=${encodeURIComponent(token)}&server=${encodeURIComponent(config.PUBLIC_URL)}`;
     await sendMail({
       to: email,
       subject: `Sign in to ${org.name}`,

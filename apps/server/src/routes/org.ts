@@ -252,7 +252,9 @@ orgRoutes.post("/invitations", requireRole("admin"), async (c) => {
     })
     .returning();
 
-  const url = `${config.PUBLIC_URL}/auth/invite?token=${encodeURIComponent(token)}`;
+  // `server` lets the mobile app bootstrap the right workspace when the link
+  // opens as a universal link / deep link; the web page ignores it
+  const url = `${config.PUBLIC_URL}/auth/invite?token=${encodeURIComponent(token)}&server=${encodeURIComponent(config.PUBLIC_URL)}`;
   await sendMail({
     to: email,
     subject: `You've been invited to ${org.name}`,

@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { colors } from "@kloop/shared";
 import { useRealtime } from "../src/realtime";
 import { registerPush } from "../src/push";
-import { useConnection } from "../src/store/connection";
+import { useConnection, useStoreHydrated } from "../src/store/connection";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, retry: 1 } },
@@ -36,24 +36,6 @@ export default function RootLayout() {
       </QueryClientProvider>
     </KeyboardProvider>
   );
-}
-
-/**
- * The connection store rehydrates asynchronously from the device keychain.
- * Subscribe to hydration so the gate re-evaluates the moment it completes —
- * reading `hasHydrated()` once during render would never trigger a re-render.
- */
-function useStoreHydrated(): boolean {
-  const [hydrated, setHydrated] = useState(() => useConnection.persist?.hasHydrated?.() ?? true);
-  useEffect(() => {
-    if (hydrated) return;
-    if (useConnection.persist?.hasHydrated?.()) {
-      setHydrated(true);
-      return;
-    }
-    return useConnection.persist?.onFinishHydration?.(() => setHydrated(true));
-  }, [hydrated]);
-  return hydrated;
 }
 
 function AuthGate() {

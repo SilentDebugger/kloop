@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import * as SecureStore from "expo-secure-store";
@@ -77,6 +78,24 @@ export const useConnection = create<ConnectionState>()(
 export function activeWorkspace(): Workspace | null {
   const s = useConnection.getState();
   return s.workspaces[s.activeIndex] ?? null;
+}
+
+/**
+ * The connection store rehydrates asynchronously from the device keychain.
+ * Subscribe to hydration so callers re-evaluate the moment it completes —
+ * reading `hasHydrated()` once during render would never trigger a re-render.
+ */
+export function useStoreHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(() => useConnection.persist?.hasHydrated?.() ?? true);
+  useEffect(() => {
+    if (hydrated) return;
+    if (useConnection.persist?.hasHydrated?.()) {
+      setHydrated(true);
+      return;
+    }
+    return useConnection.persist?.onFinishHydration?.(() => setHydrated(true));
+  }, [hydrated]);
+  return hydrated;
 }
 
 /** hook variant */
