@@ -14,6 +14,10 @@ export const colors = {
   primary: "#2E7D5B",
   /** pressed / darker primary */
   primaryDark: "#25654A",
+  /** deep forest hero block (requester home header) */
+  forest: "#1E5B44",
+  /** muted sage — disabled state on forest/primary surfaces */
+  sage: "#A9C7B7",
   /** pale mint (status badge bg, precedents banner, confirm card) */
   mint: "#E3EEE7",
   /** deeper mint for icon tiles */

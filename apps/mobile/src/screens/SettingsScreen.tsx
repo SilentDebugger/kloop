@@ -15,6 +15,12 @@ const NOTIFICATION_PREFS: { key: string; label: string; supporterOnly?: boolean 
   { key: "reviewItems", label: "Review items", supporterOnly: true },
 ];
 
+// delivery channels: push is on by default, email is opt-in (see notify.ts)
+const NOTIFICATION_CHANNELS: { key: string; label: string; hint: string; default: boolean }[] = [
+  { key: "channelPush", label: "Push notifications", hint: "On this device", default: true },
+  { key: "channelEmail", label: "Email notifications", hint: "A mail for every notification", default: false },
+];
+
 /** Settings — profile, notification toggles, workspaces, sign out. */
 export function SettingsScreen() {
   const router = useRouter();
@@ -28,8 +34,12 @@ export function SettingsScreen() {
   });
 
   const signOut = async () => {
-    await unregisterPush(); // while the session is still valid
-    await api.logout().catch(() => {});
+    // best-effort cleanup while the session is still valid, hard-capped so a
+    // dead/unreachable workspace can never trap the user on this screen
+    await Promise.race([
+      Promise.allSettled([unregisterPush(), api.logout()]),
+      new Promise((resolve) => setTimeout(resolve, 4000)),
+    ]);
     signOutActive();
     router.replace("/login");
   };
@@ -75,6 +85,37 @@ export function SettingsScreen() {
               <Switch
                 value={prefs[p.key] !== false}
                 onValueChange={(v) => updatePrefs.mutate({ ...prefs, [p.key]: v })}
+                trackColor={{ true: colors.primary, false: colors.border }}
+                thumbColor="#fff"
+              />
+            </View>
+          ))}
+        </Card>
+
+        <View style={{ paddingHorizontal: 4, paddingTop: 14, paddingBottom: 4 }}>
+          <SectionLabel>Delivery</SectionLabel>
+        </View>
+        <Card>
+          {NOTIFICATION_CHANNELS.map((ch, i, arr) => (
+            <View
+              key={ch.key}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                paddingHorizontal: 16,
+                paddingVertical: 12,
+                borderBottomWidth: i < arr.length - 1 ? 1 : 0,
+                borderBottomColor: colors.border,
+              }}
+            >
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={{ fontSize: 15, fontWeight: "500", color: colors.text }}>{ch.label}</Text>
+                <Text style={{ fontSize: 13, color: colors.textSecondary }}>{ch.hint}</Text>
+              </View>
+              <Switch
+                value={prefs[ch.key] ?? ch.default}
+                onValueChange={(v) => updatePrefs.mutate({ ...prefs, [ch.key]: v })}
                 trackColor={{ true: colors.primary, false: colors.border }}
                 thumbColor="#fff"
               />

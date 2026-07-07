@@ -200,6 +200,10 @@ export class KloopClient {
   resolve(requestId: string, input: { rawCaptureText?: string; captureKind?: string; linkedResolutionId?: string | null; attachmentIds?: string[]; skipCapture?: boolean }) {
     return this.post<{ request: RequestSummary; resolutionId: string | null }>(`/api/requests/${requestId}/resolve`, input);
   }
+  /** AI-drafted "what fixed it" capture text, generated from the full thread. */
+  resolutionDraft(requestId: string) {
+    return this.post<{ draft: string }>(`/api/requests/${requestId}/resolution-draft`, {});
+  }
   precedents(requestId: string) {
     return this.get<Precedents>(`/api/requests/${requestId}/precedents`);
   }

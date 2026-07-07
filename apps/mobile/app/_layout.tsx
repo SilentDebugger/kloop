@@ -13,6 +13,20 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, retry: 1 } },
 });
 
+/**
+ * Server linkPaths are web-app routes (/requests/<id>, /reviews, /kb/gaps).
+ * Translate them to the mobile equivalents; unknown paths are dropped rather
+ * than pushed into an "Unmatched Route" screen.
+ */
+function toMobileRoute(link: unknown): string | null {
+  if (typeof link !== "string" || !link.startsWith("/")) return null;
+  const request = /^\/requests?\/([A-Za-z0-9_-]+)/.exec(link);
+  if (request) return `/request/${request[1]}`;
+  if (link.startsWith("/reviews")) return "/(supporter)/reviews";
+  if (link.startsWith("/kb")) return "/kb";
+  return null;
+}
+
 export default function RootLayout() {
   return (
     <KeyboardProvider>
@@ -49,6 +63,8 @@ function AuthGate() {
   const hydrated = useStoreHydrated();
   const workspaces = useConnection((s) => s.workspaces);
   const activeIndex = useConnection((s) => s.activeIndex);
+  // deep link from a notification tap, held until the session is ready
+  const [pendingRoute, setPendingRoute] = useState<string | null>(null);
 
   const ws = workspaces[activeIndex] ?? null;
   const authed = hydrated && !!ws?.token && !!ws?.user;
@@ -60,22 +76,28 @@ function AuthGate() {
     if (authed) void registerPush();
   }, [authed]);
 
-  // push notification tap → deep link to the linked screen
+  // push notification tap → deep link to the linked screen. Routes are held
+  // in state and only pushed once authed, otherwise the Stack.Protected
+  // guards silently swallow the navigation (cold start races hydration).
   useEffect(() => {
     let sub: { remove: () => void } | undefined;
     void (async () => {
       try {
         const Notifications = await import("expo-notifications");
         sub = Notifications.addNotificationResponseReceivedListener((response) => {
-          const link = response.notification.request.content.data?.linkPath;
-          if (typeof link === "string" && link.startsWith("/")) router.push(link as never);
+          const route = toMobileRoute(response.notification.request.content.data?.linkPath);
+          if (route) setPendingRoute(route);
         });
+        // app cold-started by a notification tap — the listener above wasn't
+        // mounted at tap time, so pick up the launch response explicitly
+        const launch = await Notifications.getLastNotificationResponseAsync();
+        const launchRoute = toMobileRoute(launch?.notification.request.content.data?.linkPath);
+        if (launchRoute) setPendingRoute(launchRoute);
       } catch {
         // expo-notifications unavailable (web preview / Expo Go limitations)
       }
     })();
     return () => sub?.remove();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -92,11 +114,23 @@ function AuthGate() {
       if (!inAuthFlow) router.replace("/login");
       return;
     }
-    if (inAuthFlow || (segments as string[]).length === 0) {
+    // initial routing only — signed-in users may visit the auth flow on
+    // purpose ("Add a workspace…" in Settings pushes /connect)
+    if ((segments as string[]).length === 0) {
       router.replace(ws.user.role === "requester" ? "/(requester)" : "/(supporter)/queue");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, ws?.token, ws?.user?.role, activeIndex, segments[0]]);
+
+  // Declared after the home redirect above so a cold-start deep link pushes
+  // the target screen on top of home (back returns to home) instead of the
+  // redirect replacing the deep-linked screen.
+  useEffect(() => {
+    if (!pendingRoute || !authed) return;
+    setPendingRoute(null);
+    router.push(pendingRoute as never);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRoute, authed]);
 
   // Hold a blank branded frame until the keychain store has loaded, so a
   // signed-in user never sees the connect screen flash (and vice versa).
@@ -144,11 +178,11 @@ function AuthGate() {
         <Stack.Screen name="kb" />
         <Stack.Screen name="settings" />
       </Stack.Protected>
-      <Stack.Protected guard={!authed}>
-        <Stack.Screen name="connect" />
-        <Stack.Screen name="qr-scan" />
-        <Stack.Screen name="login" />
-      </Stack.Protected>
+      {/* auth flow stays reachable while signed in — "Add a workspace…" pushes
+          /connect from Settings, and a guard would silently swallow that push */}
+      <Stack.Screen name="connect" />
+      <Stack.Screen name="qr-scan" />
+      <Stack.Screen name="login" />
     </Stack>
   );
 }

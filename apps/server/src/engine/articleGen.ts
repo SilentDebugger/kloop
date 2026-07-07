@@ -4,6 +4,7 @@ import { getLlmProvider, extractJson } from "../providers/llm/index.js";
 import { searchArticles, searchResolutions } from "../search/hybrid.js";
 import { createArticleWithRevision, type BlockInput } from "./articles.js";
 import { recordEvent } from "../lib/events.js";
+import { threadTranscript } from "../lib/thread.js";
 import { notifySupportersOfReviewItem } from "./reviewNotify.js";
 import { logger } from "../lib/logger.js";
 
@@ -82,6 +83,10 @@ export async function considerArticleGeneration(resolutionId: string): Promise<v
     .from(tables.users)
     .where(inArray(tables.users.id, supporterIds));
 
+  // full conversation of the triggering request — symptoms, error messages and
+  // troubleshooting detail beyond what the capture text alone carries
+  const thread = await threadTranscript(resolution.requestId, { maxTotalChars: 4000 }).catch(() => "");
+
   const llm = getLlmProvider();
   const raw = await llm.complete({
     system:
@@ -89,6 +94,7 @@ export async function considerArticleGeneration(resolutionId: string): Promise<v
       '{"title": string, "summary": string (1-2 sentences), "blocks": [{"kind": "symptoms"|"environment"|"resolution"|"notes", "contentMd": string, "conditionText": string|null}], "confidence": number 0-1}. ' +
       "symptoms: what the user sees, as markdown bullets. environment: applies-to conditions if evident, else omit the block. " +
       "resolution: numbered steps, imperative, deduplicated across sources. notes: root cause / gotchas if evident, else omit. " +
+      "thread is the full conversation of the latest request — mine it for exact symptoms, error messages and steps. " +
       "Write for the next person hitting this problem. Do not invent steps not present in the sources.",
     prompt: JSON.stringify({
       requests: requests.map((r) => ({ title: r.title, body: r.body.slice(0, 500) })),
@@ -97,6 +103,7 @@ export async function considerArticleGeneration(resolutionId: string): Promise<v
         raw: s.rawCaptureText.slice(0, 1000),
         kind: s.captureKind,
       })),
+      thread,
     }),
     json: true,
     orgId: request.orgId,

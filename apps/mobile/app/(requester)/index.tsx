@@ -1,20 +1,30 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { colors, radii, type DeflectionSuggestion } from "@kloop/shared";
 import { api } from "../../src/api";
 import { useDrafts } from "../../src/store/drafts";
 import { useActiveWorkspace } from "../../src/store/connection";
 import { useComposerAttachments } from "../../src/uploads";
-import { Avatar, Card, Logo, SectionLabel, Spinner } from "../../src/ui";
-import { AttachChips, AttachmentTray } from "../../src/ui/attachments";
+import { Card, Logo, SectionLabel, Spinner } from "../../src/ui";
+import { AttachmentTray } from "../../src/ui/attachments";
 
-/** Home — the one-box composer with live deflection ("What's not working?"). */
+/** Home — forest hero + floating one-box composer with live deflection. */
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  // light status bar only while this (dark-hero) screen is focused
+  const [focused, setFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
   const ws = useActiveWorkspace();
   const { composerText, setComposerText, queue, dequeue } = useDrafts();
   const [text, setText] = useState(composerText);
@@ -36,6 +46,13 @@ export default function HomeScreen() {
     enabled: debounced.length >= 8 || att.ids.length > 0,
     staleTime: 30_000,
     refetchInterval: (q) => ((q.state.data?.pendingAttachments ?? 0) > 0 ? 3000 : false),
+  });
+
+  const { data: mine } = useQuery({ queryKey: ["requests", "mine"], queryFn: () => api.requests(), staleTime: 30_000 });
+  const { data: recent } = useQuery({
+    queryKey: ["articles", "home"],
+    queryFn: () => api.articles({ limit: "4" }),
+    staleTime: 5 * 60_000,
   });
 
   const send = useMutation({
@@ -67,98 +84,269 @@ export default function HomeScreen() {
 
   const suggestions = deflect?.suggestions ?? [];
   const canSend = text.trim().length >= 3 && !send.isPending && !att.uploading;
+  const openRequests = (mine?.requests ?? []).filter((r) => r.status !== "solved");
+  const replyWaiting = openRequests.filter((r) => r.unreadForRequester).length;
+  const articles = recent?.articles ?? [];
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {focused && <StatusBar style="light" />}
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}>
-          {/* header: org + avatar */}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10 }}>
-            <Logo size={26} />
-            <Text style={{ fontWeight: "700", fontSize: 16, color: colors.text, flex: 1 }}>{ws?.name ?? "kloop"}</Text>
-            <Pressable onPress={() => router.push("/(requester)/settings")}>
-              <Avatar name={ws?.user?.name} size={36} tint />
-            </Pressable>
-          </View>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
+          {/* forest fill behind the iOS overscroll bounce */}
+          <View style={{ position: "absolute", top: -600, left: 0, right: 0, height: 600, backgroundColor: colors.forest }} />
 
-          <Text style={{ fontSize: 28, fontWeight: "800", color: colors.text, letterSpacing: -0.5, marginTop: 8, marginBottom: 14 }}>
-            What's not working?
-          </Text>
-
-          {/* composer card */}
+          {/* hero */}
           <View
             style={{
+              backgroundColor: colors.forest,
+              borderBottomLeftRadius: 34,
+              borderBottomRightRadius: 34,
+              paddingTop: insets.top + 10,
+              paddingHorizontal: 22,
+              paddingBottom: 72,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Logo size={26} color="#fff" />
+              <Text style={{ fontWeight: "700", fontSize: 16, color: "#fff", flex: 1 }}>{ws?.name ?? "kloop"}</Text>
+              <Pressable onPress={() => router.push("/(requester)/settings")}>
+                <View
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 19,
+                    backgroundColor: "rgba(255,255,255,0.18)",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>
+                    {(ws?.user?.name ?? "?")
+                      .split(/\s+/)
+                      .map((p) => p[0])
+                      .slice(0, 2)
+                      .join("")
+                      .toUpperCase()}
+                  </Text>
+                </View>
+              </Pressable>
+            </View>
+
+            <Text style={{ fontSize: 34, lineHeight: 40, fontWeight: "800", color: "#fff", letterSpacing: -0.6, marginTop: 26, maxWidth: 280 }}>
+              Something not working?
+            </Text>
+            <Text style={{ fontSize: 15, lineHeight: 21, color: "rgba(255,255,255,0.72)", marginTop: 8, marginBottom: 4, maxWidth: 320 }}>
+              Tell us in one message. Most issues are solved without waiting.
+            </Text>
+          </View>
+
+          {/* composer card floats between hero and content */}
+          <View
+            style={{
+              marginTop: -52,
+              marginHorizontal: 16,
               backgroundColor: colors.card,
-              borderRadius: radii.lg,
-              borderWidth: 2,
-              borderColor: colors.primary,
-              padding: 14,
+              borderRadius: 24,
+              padding: 16,
               gap: 12,
+              shadowColor: "#1D1B16",
+              shadowOpacity: 0.1,
+              shadowRadius: 18,
+              shadowOffset: { width: 0, height: 8 },
+              elevation: 6,
             }}
           >
             <TextInput
               ref={inputRef}
               multiline
-              placeholder="Describe the problem…"
+              placeholder="Type what's wrong…"
               placeholderTextColor={colors.textFaint}
               value={text}
               onChangeText={setText}
-              style={{ minHeight: 64, fontSize: 16, color: colors.text, textAlignVertical: "top" }}
+              style={{ minHeight: 56, fontSize: 16, color: colors.text, textAlignVertical: "top" }}
             />
             <AttachmentTray items={att.attachments} onRemove={att.remove} />
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <AttachChips recording={att.recording} attach={att.attach} error={att.error} onDismissError={att.dismissError} />
+            {att.error ? (
+              <Pressable
+                onPress={att.dismissError}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  alignSelf: "flex-start",
+                  gap: 6,
+                  backgroundColor: "rgba(200,60,50,0.12)",
+                  borderRadius: 999,
+                  paddingVertical: 6,
+                  paddingHorizontal: 12,
+                }}
+              >
+                <Text numberOfLines={1} style={{ color: colors.danger, fontSize: 12, fontWeight: "600", maxWidth: 240 }}>{att.error}</Text>
+                <SymbolView name={{ ios: "xmark", android: "close" }} size={10} weight="bold" tintColor={colors.danger} />
+              </Pressable>
+            ) : null}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <RoundAction icon={{ ios: "camera", android: "photo_camera" }} onPress={() => void att.attach("camera")} />
+              <RoundAction icon={{ ios: "photo", android: "image" }} onPress={() => void att.attach("photo")} />
+              <RoundAction
+                icon={att.recording ? { ios: "stop.fill", android: "stop" } : { ios: "mic", android: "mic" }}
+                active={att.recording}
+                onPress={() => void att.attach("voice")}
+              />
               <View style={{ flex: 1 }} />
-              {/* same round submit as the chat composer — the chips need the width */}
               <Pressable
                 onPress={() => send.mutate()}
                 disabled={!canSend}
                 style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 18,
-                  backgroundColor: colors.primary,
+                  height: 40,
+                  paddingHorizontal: 24,
+                  borderRadius: 999,
+                  backgroundColor: canSend ? colors.primary : colors.sage,
                   alignItems: "center",
                   justifyContent: "center",
-                  opacity: canSend ? 1 : 0.4,
                 }}
               >
                 {send.isPending || att.uploading ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <SymbolView name={{ ios: "arrow.up", android: "arrow_upward" }} size={17} weight="semibold" tintColor="#fff" />
+                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Send</Text>
                 )}
               </Pressable>
             </View>
           </View>
 
-          {queue.length > 0 && (
-            <View style={{ backgroundColor: colors.amberSoft, borderRadius: radii.md, padding: 12, marginTop: 10 }}>
-              <Text style={{ color: colors.amber, fontSize: 13, fontWeight: "500" }}>
-                {queue.length} draft{queue.length > 1 ? "s" : ""} queued offline — will send when you're back online.
-              </Text>
-            </View>
-          )}
-
-          {/* live deflection */}
-          {isFetching && suggestions.length === 0 && <Spinner pad={20} />}
-          {suggestions.length > 0 && (
-            <View style={{ marginTop: 24, gap: 10 }}>
-              <View style={{ paddingHorizontal: 4 }}>
-                <SectionLabel>This might solve it</SectionLabel>
+          <View style={{ paddingHorizontal: 16 }}>
+            {queue.length > 0 && (
+              <View style={{ backgroundColor: colors.amberSoft, borderRadius: radii.md, padding: 12, marginTop: 12 }}>
+                <Text style={{ color: colors.amber, fontSize: 13, fontWeight: "500" }}>
+                  {queue.length} draft{queue.length > 1 ? "s" : ""} queued offline — will send when you're back online.
+                </Text>
               </View>
-              {suggestions.map((s) => (
-                <SuggestionCard key={`${s.kind}-${s.id}`} s={s} draftTitle={text.trim()} />
-              ))}
-            </View>
-          )}
+            )}
 
-          <Pressable onPress={() => router.push("/kb")} style={{ marginTop: 28 }}>
-            <Text style={{ textAlign: "center", color: colors.primary, fontWeight: "600", fontSize: 14 }}>Browse help articles →</Text>
-          </Pressable>
+            {/* live deflection */}
+            {isFetching && suggestions.length === 0 && <Spinner pad={20} />}
+            {suggestions.length > 0 && (
+              <View style={{ marginTop: 20, gap: 10 }}>
+                <View style={{ paddingHorizontal: 4 }}>
+                  <SectionLabel>This might solve it</SectionLabel>
+                </View>
+                {suggestions.map((s) => (
+                  <SuggestionCard key={`${s.kind}-${s.id}`} s={s} draftTitle={text.trim()} />
+                ))}
+              </View>
+            )}
+
+            {/* browse + my requests */}
+            <View style={{ flexDirection: "row", gap: 12, marginTop: 20 }}>
+              <Card onPress={() => router.push("/kb")} style={{ flex: 1, padding: 16, gap: 10 }}>
+                <View
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 12,
+                    backgroundColor: colors.mint,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Logo size={22} stroke={5} />
+                </View>
+                <View>
+                  <Text style={{ fontWeight: "700", fontSize: 15, color: colors.text }}>Browse help articles</Text>
+                  <Text style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 3, lineHeight: 17 }}>
+                    Step-by-step fixes, searchable
+                  </Text>
+                </View>
+              </Card>
+              <Card onPress={() => router.push("/(requester)/requests")} style={{ flex: 1, padding: 16, gap: 10 }}>
+                <View
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 12,
+                    backgroundColor: colors.chip,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ fontWeight: "800", fontSize: 16, color: colors.text }}>{openRequests.length}</Text>
+                </View>
+                <View>
+                  <Text style={{ fontWeight: "700", fontSize: 15, color: colors.text }}>My open requests</Text>
+                  <Text style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 3, lineHeight: 17 }}>
+                    {replyWaiting > 0
+                      ? `${replyWaiting} repl${replyWaiting === 1 ? "y" : "ies"} waiting for you`
+                      : openRequests.length > 0
+                        ? "We're on it"
+                        : "Nothing open right now"}
+                  </Text>
+                </View>
+              </Card>
+            </View>
+
+            {/* recently fixed */}
+            {articles.length > 0 && (
+              <View style={{ marginTop: 24, gap: 8 }}>
+                <View style={{ paddingHorizontal: 4, marginBottom: 2 }}>
+                  <SectionLabel>Fixed recently at {ws?.name ?? "your team"}</SectionLabel>
+                </View>
+                {articles.map((a) => (
+                  <Pressable
+                    key={a.id}
+                    onPress={() => router.push({ pathname: "/article/[id]", params: { id: a.id } })}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 10,
+                      backgroundColor: colors.card,
+                      borderRadius: 16,
+                      paddingVertical: 14,
+                      paddingHorizontal: 14,
+                    }}
+                  >
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary }} />
+                    <Text numberOfLines={1} style={{ flex: 1, fontSize: 14, fontWeight: "600", color: colors.text }}>
+                      {a.title}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: colors.textSecondary }}>
+                      {a.solveCount > 0 ? `${a.solveCount}× solved` : "self-serve"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
+  );
+}
+
+/** Circular light action button in the composer (camera / photo / mic). */
+function RoundAction({
+  icon,
+  onPress,
+  active,
+}: {
+  icon: ComponentProps<typeof SymbolView>["name"];
+  onPress: () => void;
+  active?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: active ? colors.primary : colors.chip,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <SymbolView name={icon} size={16} tintColor={active ? "#fff" : colors.text} />
+    </Pressable>
   );
 }
 

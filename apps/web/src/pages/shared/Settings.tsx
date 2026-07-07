@@ -15,6 +15,12 @@ const NOTIFICATION_PREFS: { key: string; label: string }[] = [
   { key: "reviewItems", label: "Review items" },
 ];
 
+// delivery channels: push is on by default, email is opt-in (see notify.ts)
+const NOTIFICATION_CHANNELS: { key: string; label: string; hint: string; default: boolean }[] = [
+  { key: "channelPush", label: "Push notifications", hint: "On your phone, via the kloop app", default: true },
+  { key: "channelEmail", label: "Email notifications", hint: "A mail for every notification", default: false },
+];
+
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -74,6 +80,22 @@ export function SettingsPage() {
             <Toggle
               checked={prefs[p.key] !== false}
               onChange={(v) => updatePrefs.mutate({ ...prefs, [p.key]: v })}
+            />
+          </div>
+        ))}
+      </Card>
+
+      <SectionLabel className="mb-2 mt-7 px-1">Delivery</SectionLabel>
+      <Card className="divide-y divide-line">
+        {NOTIFICATION_CHANNELS.map((ch) => (
+          <div key={ch.key} className="flex items-center justify-between px-4 py-3.5">
+            <span className="min-w-0">
+              <span className="block text-[15px] font-medium">{ch.label}</span>
+              <span className="block text-[13px] text-ink-secondary">{ch.hint}</span>
+            </span>
+            <Toggle
+              checked={prefs[ch.key] ?? ch.default}
+              onChange={(v) => updatePrefs.mutate({ ...prefs, [ch.key]: v })}
             />
           </div>
         ))}

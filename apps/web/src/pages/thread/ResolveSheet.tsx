@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../../lib/api";
 import { useVoiceRecorder } from "../../lib/recorder";
 import { Button, Chip, Logo, SectionLabel, Sheet } from "../../ui";
-import { IconCamera, IconChevron, IconMic, IconTerminal, IconX } from "../../ui/icons";
+import { IconCamera, IconChevron, IconSparkle, IconTerminal, IconX } from "../../ui/icons";
 
 /**
  * Resolution capture — "How did you fix it?" bottom sheet.
@@ -36,6 +36,11 @@ export function ResolveSheet({
     queryFn: () => api.similarResolutions(requestId),
     enabled: open,
     staleTime: 5 * 60_000,
+  });
+
+  const genDraft = useMutation({
+    mutationFn: () => api.resolutionDraft(requestId),
+    onSuccess: (res) => setText(res.draft),
   });
 
   const resolve = useMutation({
@@ -82,6 +87,18 @@ export function ResolveSheet({
         placeholder="Re-installed the VPN profile from Self Service, restarted the client…"
         className="w-full resize-none rounded-inner border border-line bg-card px-4 py-3 text-[15px] outline-none placeholder:text-ink-faint focus:border-primary"
       />
+
+      <button
+        onClick={() => genDraft.mutate()}
+        disabled={genDraft.isPending}
+        className="mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-mint px-3.5 py-2 text-[13px] font-semibold text-primary transition-opacity hover:opacity-80 disabled:opacity-50"
+      >
+        <IconSparkle size={14} />
+        {genDraft.isPending ? "Drafting from thread…" : "Draft from thread"}
+      </button>
+      {genDraft.isError && (
+        <p className="mt-1 text-[12px] text-danger">Couldn't generate a draft — write it manually.</p>
+      )}
 
       {attachments.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">

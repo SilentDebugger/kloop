@@ -25,7 +25,8 @@ export interface CompleteOptions {
     | "update_proposal"
     | "cluster_label"
     | "auto_answer"
-    | "auto_tag";
+    | "auto_tag"
+    | "resolution_draft";
   data?: Record<string, unknown>;
 }
 

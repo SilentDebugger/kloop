@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db, tables } from "../db/index.js";
 import { getLlmProvider, extractJson } from "../providers/llm/index.js";
+import { threadTranscript } from "../lib/thread.js";
 import { enqueue, enqueueEmbed, QUEUES } from "./queues.js";
 import { logger } from "../lib/logger.js";
 
@@ -30,15 +31,20 @@ export async function handleStructureJob(job: StructureJob): Promise<void> {
   let summary = resolution.structuredSummary;
 
   if (raw && !summary) {
+    // full conversation as context — the capture is often terse ("reinstalled
+    // the profile") and the thread carries the missing specifics
+    const thread = await threadTranscript(resolution.requestId).catch(() => "");
     try {
       const out = await getLlmProvider().complete({
         system:
-          'You clean up helpdesk resolution captures. Output strict JSON: {"summary": string (one sentence, what fixed it), "steps": string[] (imperative steps taken)}. Keep exact identifiers, commands and error codes verbatim.',
-        prompt: raw.slice(0, 4000),
+          'You clean up helpdesk resolution captures. Output strict JSON: {"summary": string (one sentence, what fixed it), "steps": string[] (imperative steps taken)}. ' +
+          "The capture is the primary source; use the thread transcript only to fill in specifics (exact commands, settings, error codes) that the capture references. " +
+          "Keep exact identifiers, commands and error codes verbatim. Do not invent steps.",
+        prompt: JSON.stringify({ capture: raw.slice(0, 4000), thread }),
         json: true,
         orgId: resolution.orgId,
         task: "structure_capture",
-        data: { raw },
+        data: { raw, thread },
       });
       const parsed = extractJson<{ summary: string; steps: string[] }>(out);
       summary = [parsed.summary, ...(parsed.steps ?? []).map((s, i) => `${i + 1}. ${s}`)].join("\n");

@@ -32,6 +32,11 @@ export default function ResolveScreen() {
     staleTime: 5 * 60_000,
   });
 
+  const genDraft = useMutation({
+    mutationFn: () => api.resolutionDraft(id),
+    onSuccess: (res) => setText(res.draft),
+  });
+
   const resolve = useMutation({
     mutationFn: (skip: boolean) =>
       api.resolve(id, {
@@ -108,6 +113,31 @@ export default function ResolveScreen() {
           textAlignVertical: "top",
         }}
       />
+
+      <Pressable
+        onPress={() => genDraft.mutate()}
+        disabled={genDraft.isPending}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          alignSelf: "flex-start",
+          gap: 6,
+          backgroundColor: colors.mint,
+          borderRadius: 999,
+          paddingVertical: 8,
+          paddingHorizontal: 14,
+          marginTop: 8,
+          opacity: genDraft.isPending ? 0.55 : 1,
+        }}
+      >
+        <SymbolView name={{ ios: "sparkles", android: "auto_awesome" }} size={13} tintColor={colors.primary} />
+        <Text style={{ fontSize: 13, fontWeight: "600", color: colors.primary }}>
+          {genDraft.isPending ? "Drafting from thread…" : "Draft from thread"}
+        </Text>
+      </Pressable>
+      {genDraft.isError && (
+        <Text style={{ fontSize: 12, color: colors.danger, marginTop: 4 }}>Couldn't generate a draft — write it manually.</Text>
+      )}
 
       <View style={{ marginTop: 8 }}>
         <AttachmentTray items={attachments} onRemove={(rid) => setAttachments((x) => x.filter((y) => y.id !== rid))} />

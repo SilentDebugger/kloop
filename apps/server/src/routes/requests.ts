@@ -7,8 +7,10 @@ import { orgSettings, type AppEnv } from "../http/context.js";
 import { nextCounter } from "../lib/counters.js";
 import { recordEvent } from "../lib/events.js";
 import { notifyUser } from "../lib/notify.js";
+import { threadTranscript } from "../lib/thread.js";
 import { bus } from "../realtime/bus.js";
 import { enqueueEmbed, enqueue, QUEUES } from "../workers/queues.js";
+import { getLlmProvider, extractJson } from "../providers/llm/index.js";
 
 export const requestRoutes = new Hono<AppEnv>();
 requestRoutes.use("*", requireAuth());
@@ -706,6 +708,38 @@ requestRoutes.post("/:id/reopen", async (c) => {
 // ---------------------------------------------------------------------------
 // Resolution capture (<30s) + precedents
 // ---------------------------------------------------------------------------
+
+/**
+ * AI assist for the resolve sheet: draft the "what fixed it" capture from the
+ * full thread. The supporter reviews/edits before submitting — never auto-saved.
+ */
+requestRoutes.post("/:id/resolution-draft", requireRole("supporter"), async (c) => {
+  const org = c.get("org");
+  const loaded = await loadOwnedRequest(c);
+  if ("error" in loaded) return loaded.error;
+  const { request } = loaded;
+
+  const transcript = await threadTranscript(request.id);
+  try {
+    const raw = await getLlmProvider().complete({
+      system:
+        "You write the resolution capture for a solved helpdesk request: a short plain-text note describing what fixed it, " +
+        "based ONLY on the conversation transcript. 1-2 sentences on the fix, then the concrete steps taken (one per line). " +
+        "Keep commands, settings and identifiers verbatim. If the fix isn't clear from the thread, summarize the most likely fix and say so. " +
+        'Output strict JSON: {"draft": string}.',
+      prompt: JSON.stringify({ request: { title: request.title, body: request.body.slice(0, 500) }, thread: transcript }),
+      json: true,
+      orgId: org.id,
+      task: "resolution_draft",
+      data: { title: request.title, thread: transcript },
+    });
+    const draft = extractJson<{ draft: string }>(raw).draft?.trim();
+    if (!draft) return c.json({ error: "draft generation returned nothing" }, 502);
+    return c.json({ draft });
+  } catch {
+    return c.json({ error: "draft generation failed" }, 502);
+  }
+});
 
 /**
  * "Done — resolve": capture what fixed it (free text / voice / photo / log),

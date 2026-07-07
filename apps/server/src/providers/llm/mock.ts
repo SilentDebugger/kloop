@@ -28,6 +28,8 @@ export class MockLlmProvider implements LlmProvider {
         return JSON.stringify(this.autoAnswer(opts.data ?? {}));
       case "auto_tag":
         return JSON.stringify(this.autoTag(opts.data ?? {}));
+      case "resolution_draft":
+        return JSON.stringify(this.resolutionDraft(opts.data ?? {}));
       default:
         return opts.json ? "{}" : "ok";
     }
@@ -190,6 +192,19 @@ export class MockLlmProvider implements LlmProvider {
     const label = this.clusterLabel({ titles: [String(data.title ?? "")] }) as { label: string };
     const word = label.label.split(" ")[0];
     return { tags: word && word !== "untitled" ? [word] : [] };
+  }
+
+  private resolutionDraft(data: Record<string, unknown>): unknown {
+    const thread = String(data.thread ?? "");
+    // supporter/internal lines carry the fix; requester lines carry symptoms
+    const fixLines = thread
+      .split("\n")
+      .filter((l) => /^(Supporter|Internal note|AI auto-answer)/.test(l))
+      .map((l) => l.replace(/^[^:]+:\s*/, ""));
+    const steps = fixLines.flatMap((l) => this.sentences(l)).slice(0, 6);
+    const title = String(data.title ?? "the issue");
+    if (steps.length === 0) return { draft: `Resolved "${title}" — see thread for details.` };
+    return { draft: [`Fixed "${title}".`, ...steps.map((s) => (s.endsWith(".") ? s : `${s}.`))].join("\n") };
   }
 
   private autoAnswer(data: Record<string, unknown>): unknown {
