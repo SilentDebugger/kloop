@@ -1,5 +1,21 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { db, tables } from "../db/index.js";
+import { bus } from "../realtime/bus.js";
+
+/** Status events rendered inline in the thread ("Maya is now handling this request"). */
+export async function addSystemMessage(orgId: string, requestId: string, body: string): Promise<void> {
+  const [message] = await db
+    .insert(tables.messages)
+    .values({ orgId, requestId, kind: "system", body })
+    .returning();
+  bus.publish(orgId, {
+    type: "message_created",
+    data: {
+      requestId,
+      message: { id: message.id, kind: "system", body, author: null, createdAt: message.createdAt },
+    },
+  });
+}
 
 /**
  * Plain-text transcript of a request thread for LLM context: original request

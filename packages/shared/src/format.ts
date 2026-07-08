@@ -23,6 +23,8 @@ export function docStateLabel(state: DocState): string {
   switch (state) {
     case "working":
       return "Writing this up…";
+    case "waiting_confirmation":
+      return "Waiting for the user to confirm the fix";
     case "drafted":
       return "New draft ready for review";
     case "already_documented":

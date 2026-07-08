@@ -36,6 +36,8 @@ export default function InviteDeepLink() {
     try {
       const res = await api.acceptInvite(token, name.trim(), password);
       useConnection.getState().setSession(res.token, res.user);
+      // see auth/verify.tsx — collapse the deep link's pushed history first
+      if (router.canDismiss()) router.dismissAll();
       router.replace(res.user.role === "requester" ? "/(requester)" : "/(supporter)/queue");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not accept the invitation.");

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
+import { featureFlags } from "react-native-screens";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -12,6 +13,18 @@ import { useConnection, useStoreHydrated } from "../src/store/connection";
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, retry: 1 } },
 });
+
+// The home composer's Send button uses Expo Router's native iOS 18 zoom
+// transition (Link.AppleZoom) into the request thread. Both flags already
+// default to `true` in the installed react-native-screens, but are pinned
+// explicitly here since they're load-bearing for that transition feeling
+// native — without them the destination screen can ignore touches for ~1s
+// after the animation settles. Setting them to their current default is a
+// documented no-op, kept as a guard against the default changing upstream.
+if (Platform.OS === "ios") {
+  featureFlags.experiment.iosPreventReattachmentOfDismissedScreens = true;
+  featureFlags.experiment.ios26AllowInteractionsDuringTransition = true;
+}
 
 /**
  * Server linkPaths are web-app routes (/requests/<id>, /reviews, /kb/gaps).

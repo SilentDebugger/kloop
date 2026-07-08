@@ -13,9 +13,13 @@ import { NewRequestSheet } from "./NewRequestSheet";
 
 type Scope = "unassigned" | "mine" | "ai" | "all";
 
-/** Open requests the AI is currently handling (answered, unclaimed, awaiting the user). */
+/**
+ * Open requests the AI is currently handling (answered, unclaimed, awaiting
+ * the user). Once the user says the auto-answer didn't help the request is
+ * escalated — it needs a human again, so it belongs back in Unassigned.
+ */
 function isAiHandled(r: RequestSummary): boolean {
-  return r.autoAnswered && !r.claimedBy && r.status !== "solved";
+  return r.autoAnswered && !r.escalated && !r.claimedBy && r.status !== "solved";
 }
 
 export function QueuePage() {

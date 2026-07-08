@@ -41,7 +41,9 @@ export default function QrScanScreen() {
           handled.current = true;
           setLocked(true);
           haptics.success();
-          router.replace({ pathname: "/connect", params: { scanned: data } });
+          // pop back to the connect screen we came from (native slide) instead
+          // of replacing this screen with a second connect instance
+          router.dismissTo({ pathname: "/connect", params: { scanned: data } });
         }}
       />
       <SafeAreaView style={{ position: "absolute", top: 0, left: 0, right: 0, alignItems: "center" }}>

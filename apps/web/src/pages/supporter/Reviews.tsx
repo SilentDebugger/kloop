@@ -136,6 +136,7 @@ function ActivityRow({ item }: { item: AiActivityItem }) {
 function ActivityGlyph({ state }: { state: DocState }) {
   if (state === "working") return <span className="animate-pulse text-[15px] text-primary">✦</span>;
   const map: Record<Exclude<DocState, "working">, [string, string]> = {
+    waiting_confirmation: ["◷", "text-ink-faint"],
     drafted: ["✦", "text-primary"],
     already_documented: ["✓", "text-primary"],
     covered_by_draft: ["✦", "text-ink-faint"],

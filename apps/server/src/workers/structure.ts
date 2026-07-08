@@ -3,6 +3,7 @@ import { db, tables } from "../db/index.js";
 import { getLlmProvider, extractJson } from "../providers/llm/index.js";
 import { threadTranscript } from "../lib/thread.js";
 import { enqueue, enqueueEmbed, QUEUES } from "./queues.js";
+import { bus } from "../realtime/bus.js";
 import { logger } from "../lib/logger.js";
 
 export type StructureJob = { resolutionId: string };
@@ -60,6 +61,26 @@ export async function handleStructureJob(job: StructureJob): Promise<void> {
     .where(eq(tables.resolutions.id, resolution.id));
 
   await enqueueEmbed("resolution", resolution.id);
-  // give the embedding a moment to land; article generation reads it via search
-  await enqueue(QUEUES.articleGen, { resolutionId: resolution.id }, { startAfterSeconds: 6 });
+
+  // Article generation is gated on the requester confirming the fix — an
+  // unconfirmed resolution may turn out to be wrong ("not yet" reopens the
+  // request), and a wrong fix must never seed a knowledge-base draft. Guest
+  // requests auto-confirm at resolve time, so they proceed immediately;
+  // everything else parks as waiting_confirmation and the confirm endpoint
+  // enqueues generation once the requester says it's fixed.
+  const request = await db.query.requests.findFirst({ where: eq(tables.requests.id, resolution.requestId) });
+  if (request?.confirmationState === "confirmed") {
+    // give the embedding a moment to land; article generation reads it via search
+    await enqueue(QUEUES.articleGen, { resolutionId: resolution.id }, { startAfterSeconds: 6 });
+  } else {
+    await db
+      .update(tables.resolutions)
+      .set({ docState: "waiting_confirmation", docNote: "Waiting for the user to confirm the fix before writing this up." })
+      .where(eq(tables.resolutions.id, resolution.id));
+    bus.publish(resolution.orgId, {
+      type: "ai_activity",
+      supporterOnly: true,
+      data: { resolutionId: resolution.id, requestId: resolution.requestId, state: "waiting_confirmation" },
+    });
+  }
 }

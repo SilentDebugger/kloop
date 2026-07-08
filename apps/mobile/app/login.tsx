@@ -8,7 +8,7 @@ import { api } from "../src/api";
 import { haptics } from "../src/haptics";
 import { registerPush } from "../src/push";
 import { useActiveWorkspace, useConnection } from "../src/store/connection";
-import { Button, Card, ErrorNote, Input } from "../src/ui";
+import { animateLayout, Button, Card, ErrorNote, Input, Reveal } from "../src/ui";
 
 /** Org-branded login: magic link (enter code from email) or password. */
 export default function LoginScreen() {
@@ -32,6 +32,8 @@ export default function LoginScreen() {
     haptics.success();
     setSession(token, user);
     void registerPush();
+    // login may be stacked on connect (native slide) — collapse before landing
+    if (router.canDismiss()) router.dismissAll();
     router.replace(user.role === "requester" ? "/(requester)" : "/(supporter)/queue");
   };
 
@@ -42,6 +44,7 @@ export default function LoginScreen() {
       if (effectiveMode === "magic") {
         await api.requestMagicLink(email.trim());
         haptics.success();
+        animateLayout();
         setSent(true);
       } else {
         const res = await api.login(email.trim(), password);
@@ -49,6 +52,7 @@ export default function LoginScreen() {
       }
     } catch (e) {
       haptics.error();
+      animateLayout();
       setError(e instanceof ApiError ? e.message : "Something went wrong — try again.");
     } finally {
       setBusy(false);
@@ -78,7 +82,10 @@ export default function LoginScreen() {
             <Pressable
               onPress={() => {
                 removeWorkspace(activeIndex);
-                router.replace("/connect");
+                // pushed from connect → slide back to it; otherwise (login is
+                // the stack root after a redirect) swap it in
+                if (router.canGoBack()) router.back();
+                else router.replace("/connect");
               }}
             >
               <Text style={{ fontSize: 14, color: colors.primary, fontWeight: "600" }}>change</Text>
@@ -86,15 +93,22 @@ export default function LoginScreen() {
           </View>
 
           {sent ? (
-            <Card style={{ backgroundColor: colors.mint, padding: 18, gap: 6 }}>
-              <Text style={{ fontWeight: "700", color: colors.primary, fontSize: 15 }}>Check your email</Text>
-              <Text style={{ fontSize: 14, color: colors.text, lineHeight: 20 }}>
-                If an account exists for {email}, a sign-in link is on its way. Open it on this device to finish signing in.
-              </Text>
-              <Pressable onPress={() => setSent(false)}>
-                <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13, marginTop: 6 }}>Use a different email</Text>
-              </Pressable>
-            </Card>
+            <Reveal>
+              <Card style={{ backgroundColor: colors.mint, padding: 18, gap: 6 }}>
+                <Text style={{ fontWeight: "700", color: colors.primary, fontSize: 15 }}>Check your email</Text>
+                <Text style={{ fontSize: 14, color: colors.text, lineHeight: 20 }}>
+                  If an account exists for {email}, a sign-in link is on its way. Open it on this device to finish signing in.
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    animateLayout();
+                    setSent(false);
+                  }}
+                >
+                  <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13, marginTop: 6 }}>Use a different email</Text>
+                </Pressable>
+              </Card>
+            </Reveal>
           ) : (
             <View style={{ gap: 10 }}>
               <Input
@@ -118,7 +132,13 @@ export default function LoginScreen() {
                 onPress={() => void submit()}
               />
               {ws.auth.magicLink && ws.auth.password && (
-                <Pressable onPress={() => setMode(effectiveMode === "magic" ? "password" : "magic")}>
+                <Pressable
+                  onPress={() => {
+                    haptics.select();
+                    animateLayout();
+                    setMode(effectiveMode === "magic" ? "password" : "magic");
+                  }}
+                >
                   <Text style={{ textAlign: "center", fontWeight: "600", fontSize: 14, color: colors.text, paddingVertical: 8 }}>
                     {effectiveMode === "magic" ? "Use a password instead" : "Use a magic link instead"}
                   </Text>

@@ -59,7 +59,7 @@ export default function KbScreen() {
         <View style={{ marginTop: 10, gap: 10 }}>
           <AttachmentTray items={att.attachments} onRemove={att.remove} />
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <AttachChips recording={att.recording} attach={att.attach} error={att.error} onDismissError={att.dismissError} camera={false} />
+            <AttachChips recording={att.recording} attach={att.attach} error={att.error} onDismissError={att.dismissError} />
           </View>
         </View>
 

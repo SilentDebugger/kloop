@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  LayoutAnimation,
   Pressable,
   StyleSheet,
   Text,
@@ -65,11 +66,31 @@ export function Button({
   const fg =
     variant === "primary" ? colors.onPrimary : variant === "danger" ? colors.danger : variant === "mint" ? colors.primary : colors.text;
   const pad = size === "sm" ? { paddingVertical: 7, paddingHorizontal: 14 } : size === "lg" ? { paddingVertical: 14, paddingHorizontal: 20 } : { paddingVertical: 11, paddingHorizontal: 18 };
+
+  // cross-fades label <-> spinner in place instead of inserting one next to
+  // the label, which used to shift the text sideways whenever `loading` flipped
+  const labelOpacity = useRef(new Animated.Value(loading ? 0 : 1)).current;
+  const spinnerOpacity = useRef(new Animated.Value(loading ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(labelOpacity, { toValue: loading ? 0 : 1, duration: 160, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      Animated.timing(spinnerOpacity, { toValue: loading ? 1 : 0, duration: 160, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+    ]).start();
+  }, [loading, labelOpacity, spinnerOpacity]);
+
   const inner = (
-    <>
-      {loading ? <ActivityIndicator size="small" color={fg} /> : icon}
-      <Text numberOfLines={1} style={{ color: fg, fontWeight: "600", fontSize: size === "sm" ? 13 : 15 }}>{title}</Text>
-    </>
+    <View>
+      <Animated.View style={{ flexDirection: "row", alignItems: "center", gap: 8, opacity: labelOpacity }}>
+        {icon}
+        <Text numberOfLines={1} style={{ color: fg, fontWeight: "600", fontSize: size === "sm" ? 13 : 15 }}>{title}</Text>
+      </Animated.View>
+      <Animated.View
+        pointerEvents="none"
+        style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, alignItems: "center", justifyContent: "center", opacity: spinnerOpacity }}
+      >
+        <ActivityIndicator size="small" color={fg} />
+      </Animated.View>
+    </View>
   );
   const shape: ViewStyle = {
     borderRadius: radii.pill,
@@ -361,6 +382,33 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
   );
 }
 
+/**
+ * Standard "content appeared/disappeared in place" transition. Call right
+ * before the state change that adds/removes views so the next layout pass
+ * cross-fades instead of snapping.
+ */
+export function animateLayout(duration = 220): void {
+  LayoutAnimation.configureNext(LayoutAnimation.create(duration, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity));
+}
+
+/** Fades + slides its children up into place on mount — for results appearing (found-workspace card, etc.). */
+export function Reveal({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, { toValue: 1, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [anim]);
+  return (
+    <Animated.View
+      style={[
+        { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] },
+        style,
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
 export function ErrorNote({ children }: { children: ReactNode }) {
   return (
     <View style={{ backgroundColor: colors.dangerSoft, borderRadius: radii.md, padding: 12 }}>
@@ -413,6 +461,7 @@ export function Segmented<T extends string>({
 export function AiGlyph({ state, size = 15 }: { state: DocState; size?: number }) {
   if (state === "working") return <PulsingSparkle size={size} />;
   const map = {
+    waiting_confirmation: { ios: "hourglass", android: "hourglass_empty", tint: colors.textSecondary },
     drafted: { ios: "doc.badge.plus", android: "note_add", tint: colors.primary },
     already_documented: { ios: "checkmark.circle.fill", android: "check_circle", tint: colors.primary },
     covered_by_draft: { ios: "doc.on.doc", android: "file_copy", tint: colors.textSecondary },

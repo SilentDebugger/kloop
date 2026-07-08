@@ -18,13 +18,15 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
 import { SymbolView } from "expo-symbols";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { Link, useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { autoAnswerSkipLabel, colors, docStateLabel, radii, type DeflectionSuggestion, type MessageView, type RequestDetail, type RequestSummary, type ResolutionView } from "@kloop/shared";
 import { api } from "../../src/api";
 import { clockTime, sentLabel } from "../../src/format";
 import { haptics } from "../../src/haptics";
+import { buildPendingDetail, decodePendingAttachments } from "../../src/pendingRequest";
 import { useActiveWorkspace } from "../../src/store/connection";
+import { useDrafts } from "../../src/store/drafts";
 import { pickImage, uploadFile } from "../../src/uploads";
 import { useVoiceNote } from "../../src/recorder";
 import { AiGlyph, Button, Chip, GlassSurface, liquidGlass, Logo, SectionLabel, Spinner, StatusBadge } from "../../src/ui";
@@ -32,19 +34,53 @@ import { AttachmentTray, RemoteAttachments, type LocalAttachment } from "../../s
 
 /** Request thread — requester confirm loop / supporter workbench in one route. */
 export default function RequestScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, draft, attachments } = useLocalSearchParams<{ id: string; draft?: string; attachments?: string }>();
   const ws = useActiveWorkspace();
   const user = ws?.user;
   const qc = useQueryClient();
+  const router = useRouter();
+
+  // `id === "pending"` is the zoom-transition entry point (see the home
+  // composer's Send button): the thread mounts instantly against a
+  // client-only detail built from the draft, then creates the request
+  // itself and swaps in the real id via `setParams` — no remount, so the
+  // zoom's interactive dismiss stays wired up across the swap.
+  const isPending = id === "pending";
+  const [pendingDetail] = useState<RequestDetail | null>(() =>
+    isPending ? buildPendingDetail(draft ?? "", decodePendingAttachments(attachments), user ?? null) : null,
+  );
+  const [createAttempt, setCreateAttempt] = useState(0);
+  const [createFailed, setCreateFailed] = useState(false);
+  const firedAttempt = useRef(-1);
+
+  useEffect(() => {
+    if (!isPending || firedAttempt.current === createAttempt) return;
+    firedAttempt.current = createAttempt;
+    const title = (draft ?? "").trim();
+    api
+      .createRequest({ title, channel: "mobile", attachmentIds: decodePendingAttachments(attachments).map((a) => a.id) })
+      .then((res) => {
+        haptics.success();
+        setCreateFailed(false);
+        router.setParams({ id: res.request.id });
+      })
+      .catch(() => {
+        haptics.warning();
+        useDrafts.getState().enqueue(title);
+        setCreateFailed(true);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPending, createAttempt]);
 
   const { data } = useQuery({
     queryKey: ["request", id],
     queryFn: () => api.requestDetail(id),
-    enabled: !!id,
+    enabled: !!id && !isPending,
     refetchInterval: 20_000,
   });
 
-  const supporterView = user && user.role !== "requester" && data?.request.author?.id !== user.id;
+  const detail = data ?? pendingDetail ?? undefined;
+  const supporterView = user && user.role !== "requester" && detail?.request.author?.id !== user.id;
 
   // Fetching the detail marks the request read on the server, but no SSE event
   // reaches this very client — patch the cached lists so row + tab badges
@@ -61,14 +97,21 @@ export default function RequestScreen() {
   // between them produces a one-frame layout jump under the status bar.
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
-      {!data ? (
+      {!detail ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <Spinner pad={0} />
         </View>
       ) : supporterView ? (
-        <Workbench detail={data} />
+        <Workbench detail={detail} />
       ) : (
-        <RequesterThread detail={data} />
+        <RequesterThread
+          detail={detail}
+          pendingStatus={isPending ? (createFailed ? "failed" : "creating") : undefined}
+          onRetryCreate={() => {
+            setCreateFailed(false);
+            setCreateAttempt((a) => a + 1);
+          }}
+        />
       )}
     </SafeAreaView>
   );
@@ -79,23 +122,26 @@ export default function RequestScreen() {
 function BackHeader({ title, subtitle, right }: { title: string; subtitle?: string; right?: React.ReactNode }) {
   const router = useRouter();
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 8, paddingBottom: 10, paddingHorizontal: 16 }}>
-      <Pressable onPress={() => router.back()}>
-        <GlassSurface interactive fallbackColor={colors.card} style={{ width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ fontSize: 18, color: colors.text }}>‹</Text>
-        </GlassSurface>
-      </Pressable>
-      <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={{ fontWeight: "700", fontSize: 15, color: colors.text }}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text numberOfLines={1} style={{ fontSize: 12, color: colors.textSecondary }}>
-            {subtitle}
+    <View>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 8, paddingBottom: 10, paddingHorizontal: 16 }}>
+        <Pressable onPress={() => router.back()}>
+          <GlassSurface interactive fallbackColor={colors.card} style={{ width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ fontSize: 18, color: colors.text }}>‹</Text>
+          </GlassSurface>
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text numberOfLines={1} style={{ fontWeight: "700", fontSize: 15, color: colors.text }}>
+            {title}
           </Text>
-        ) : null}
+          {subtitle ? (
+            <Text numberOfLines={1} style={{ fontSize: 12, color: colors.textSecondary }}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+        {right}
       </View>
-      {right}
+      <View style={{ height: 1, backgroundColor: colors.border }} />
     </View>
   );
 }
@@ -192,7 +238,7 @@ function FadeAway({ show, children }: { show: boolean; children: React.ReactNode
 }
 
 /** "Request received" confirmation card — shown until a supporter (or the AI) takes over. */
-function ReceivedCard({ requestId, orgName, hasImage }: { requestId: string; orgName: string; hasImage: boolean }) {
+function ReceivedCard({ requestId, orgName, hasImage, pending }: { requestId: string; orgName: string; hasImage: boolean; pending?: boolean }) {
   const qc = useQueryClient();
   const [sending, setSending] = useState(false);
 
@@ -224,7 +270,9 @@ function ReceivedCard({ requestId, orgName, hasImage }: { requestId: string; org
         You're in the queue. We'll notify you the moment someone picks this up —{" "}
         <Text style={{ fontWeight: "700" }}>usually within 15 minutes</Text> on weekdays.
       </Text>
-      {!hasImage && (
+      {/* the request doesn't exist on the server yet while pending — attaching
+          a screenshot has nothing to attach it to until creation resolves */}
+      {!hasImage && !pending && (
         <Pressable
           onPress={() => void addScreenshot()}
           disabled={sending}
@@ -249,6 +297,38 @@ function ReceivedCard({ requestId, orgName, hasImage }: { requestId: string; org
           </Text>
         </Pressable>
       )}
+    </View>
+  );
+}
+
+/** Shown instead of `ReceivedCard` when the background create failed (offline / server error). */
+function CreateFailedCard({ onRetry }: { onRetry: () => void }) {
+  return (
+    <View style={{ backgroundColor: colors.card, borderRadius: radii.lg, padding: 16, gap: 12 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <View
+          style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.amberSoft, alignItems: "center", justifyContent: "center" }}
+        >
+          <SymbolView name={{ ios: "exclamationmark", android: "priority_high" }} size={15} weight="bold" tintColor={colors.amber} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontWeight: "800", fontSize: 16, color: colors.text }}>Couldn't send</Text>
+          <Text style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 1 }}>Saved on this device — will retry automatically too</Text>
+        </View>
+      </View>
+      <Pressable
+        onPress={onRetry}
+        style={({ pressed }) => ({
+          alignSelf: "flex-start",
+          backgroundColor: colors.chip,
+          borderRadius: radii.md,
+          paddingVertical: 10,
+          paddingHorizontal: 16,
+          opacity: pressed ? 0.7 : 1,
+        })}
+      >
+        <Text style={{ fontSize: 13.5, fontWeight: "700", color: colors.text }}>Retry now</Text>
+      </Pressable>
     </View>
   );
 }
@@ -290,7 +370,16 @@ function WhileYouWait({ suggestions }: { suggestions: DeflectionSuggestion[] }) 
   );
 }
 
-function RequesterThread({ detail }: { detail: RequestDetail }) {
+function RequesterThread({
+  detail,
+  pendingStatus,
+  onRetryCreate,
+}: {
+  detail: RequestDetail;
+  /** set only while this thread was opened via the zoom-transition send flow */
+  pendingStatus?: "creating" | "failed";
+  onRetryCreate?: () => void;
+}) {
   const { request, messages } = detail;
   const ws = useActiveWorkspace();
   const qc = useQueryClient();
@@ -332,14 +421,35 @@ function RequesterThread({ detail }: { detail: RequestDetail }) {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-      <BackHeader title={request.title} subtitle={`Sent ${sentLabel(request.createdAt)}`} right={<StatusBadge status={request.status} />} />
+      <BackHeader
+        title={request.title}
+        subtitle={request.ref ? `${request.ref} · Sent ${sentLabel(request.createdAt)}` : `Sent ${sentLabel(request.createdAt)}`}
+        right={<StatusBadge status={request.status} />}
+      />
 
       {/* status timeline */}
-      <View style={{ paddingHorizontal: 20, paddingVertical: 10 }}>
+      <View style={{ paddingHorizontal: 20, paddingVertical: 14 }}>
         <View style={{ height: 3, backgroundColor: colors.border, borderRadius: 2 }}>
           <View style={{ height: 3, width: `${(reached / 2) * 100}%`, backgroundColor: colors.primary, borderRadius: 2 }} />
+          {[0, 1, 2].map((i) => (
+            <View
+              key={i}
+              style={{
+                position: "absolute",
+                top: -3,
+                left: `${(i / 2) * 100}%`,
+                marginLeft: i === 0 ? 0 : i === 2 ? -9 : -4.5,
+                width: 9,
+                height: 9,
+                borderRadius: 4.5,
+                backgroundColor: i <= reached ? colors.primary : colors.border,
+                borderWidth: 2,
+                borderColor: colors.background,
+              }}
+            />
+          ))}
         </View>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8 }}>
           {["Sent", "Being handled", "Solved"].map((s, i) => (
             <Text key={s} style={{ fontSize: 12, fontWeight: "600", color: i <= reached ? colors.primary : colors.textFaint }}>
               {s}
@@ -356,12 +466,18 @@ function RequesterThread({ detail }: { detail: RequestDetail }) {
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: composerH + 12, gap: 10 }}
         >
           {[originalMessage(detail), ...messages].map(
-            (m) => m && <Bubble key={m.id} m={m} ownId={ws?.user?.id ?? ""} />,
+            // only the very first (just-sent) bubble is a plausible landing
+            // rect for the composer's zoom transition
+            (m, i) => m && <Bubble key={m.id} m={m} ownId={ws?.user?.id ?? ""} zoomTarget={i === 0} />,
           )}
 
           <FadeAway show={waiting}>
             <View style={{ gap: 10 }}>
-              <ReceivedCard requestId={request.id} orgName={ws?.name ?? "Support"} hasImage={hasImage} />
+              {pendingStatus === "failed" ? (
+                <CreateFailedCard onRetry={onRetryCreate ?? (() => {})} />
+              ) : (
+                <ReceivedCard requestId={request.id} orgName={ws?.name ?? "Support"} hasImage={hasImage} pending={pendingStatus === "creating"} />
+              )}
               {suggestions.length > 0 && <WhileYouWait suggestions={suggestions} />}
             </View>
           </FadeAway>
@@ -575,7 +691,7 @@ function DocStatusLine({ r }: { r: ResolutionView }) {
 
 /* ===================================================================== */
 
-function Bubble({ m, ownId }: { m: MessageView; ownId: string }) {
+function Bubble({ m, ownId, zoomTarget }: { m: MessageView; ownId: string; zoomTarget?: boolean }) {
   const router = useRouter();
   if (m.kind === "system") {
     return <Text style={{ textAlign: "center", fontSize: 12, color: colors.textFaint, paddingVertical: 2 }}>{m.body}</Text>;
@@ -602,7 +718,7 @@ function Bubble({ m, ownId }: { m: MessageView; ownId: string }) {
     .filter(Boolean)
     .join(" · ");
 
-  return (
+  const bubble = (
     <View
       style={{
         backgroundColor: own ? colors.primary : colors.card,
@@ -610,8 +726,9 @@ function Bubble({ m, ownId }: { m: MessageView; ownId: string }) {
         borderBottomRightRadius: own ? 6 : radii.bubble,
         borderBottomLeftRadius: own ? radii.bubble : 6,
         padding: 12,
-        maxWidth: "85%",
-        alignSelf: own ? "flex-end" : "flex-start",
+        // when acting as the zoom target, the outer wrapper below owns
+        // width-capping + alignment so the overlay matches the bubble rect
+        ...(zoomTarget ? null : { maxWidth: "85%" as const, alignSelf: own ? ("flex-end" as const) : ("flex-start" as const) }),
       }}
     >
       {m.body ? <Text style={{ fontSize: 15, lineHeight: 21, color: own ? "#fff" : colors.text }}>{m.body}</Text> : null}
@@ -624,6 +741,25 @@ function Bubble({ m, ownId }: { m: MessageView; ownId: string }) {
         </Pressable>
       ) : null}
       <Text style={{ fontSize: 11, color: own ? "rgba(255,255,255,0.7)" : colors.textSecondary, marginTop: 4, textAlign: own ? "right" : "left" }}>{meta}</Text>
+    </View>
+  );
+
+  if (!zoomTarget) return bubble;
+
+  // Landing rect for the composer's zoom transition. The bubble must NOT be a
+  // child of Link.AppleZoomTarget: its native wrapper view stops descendants
+  // (text, images) from being drawn, leaving an empty bubble shell. The native
+  // side only reads the wrapped view's *frame* for alignment, so the bubble
+  // renders normally and an invisible overlay with the identical rect is
+  // handed to the detector instead.
+  return (
+    <View style={{ maxWidth: "85%", alignSelf: own ? "flex-end" : "flex-start" }}>
+      {bubble}
+      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
+        <Link.AppleZoomTarget>
+          <View style={{ flex: 1 }} />
+        </Link.AppleZoomTarget>
+      </View>
     </View>
   );
 }
@@ -728,7 +864,9 @@ function Composer({
     }
   };
 
-  const canSend = (text.trim().length > 0 || attachments.length > 0) && !send.isPending && !uploading;
+  // "pending" is the placeholder id used before the zoom-transition send flow
+  // has created the real request — there's nothing to reply to yet
+  const canSend = (text.trim().length > 0 || attachments.length > 0) && !send.isPending && !uploading && requestId !== "pending";
 
   return (
     <ComposerBar

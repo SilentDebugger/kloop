@@ -7,6 +7,7 @@ import { blocksForRevision } from "./articles.js";
 import { precedentsFor } from "./precedents.js";
 import { recordEvent } from "../lib/events.js";
 import { notifyUser } from "../lib/notify.js";
+import { addSystemMessage } from "../lib/thread.js";
 import { bus } from "../realtime/bus.js";
 import { logger } from "../lib/logger.js";
 
@@ -144,6 +145,14 @@ export async function tryAutoAnswer(requestId: string): Promise<boolean> {
       lastActivityAt: new Date(),
     })
     .where(eq(tables.requests.id, request.id));
+
+  // make the AI takeover explicit in the thread — requesters shouldn't have
+  // to infer from the bubble's meta line that no human has seen this yet
+  await addSystemMessage(
+    request.orgId,
+    request.id,
+    "kloop answered this automatically. If it doesn't fix it, the support team takes over.",
+  );
 
   await recordEvent(request.orgId, "ai", null, "auto_answer_sent", {
     requestId: request.id,

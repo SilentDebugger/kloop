@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Keyboard,
+  KeyboardAvoidingView,
+  LayoutAnimation,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { SymbolView } from "expo-symbols";
-import { useFocusEffect, useRouter } from "expo-router";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link, useFocusEffect, useRouter } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
 import { colors, radii, type DeflectionSuggestion } from "@kloop/shared";
 import { api } from "../../src/api";
 import { haptics } from "../../src/haptics";
@@ -13,6 +26,7 @@ import { useActiveWorkspace } from "../../src/store/connection";
 import { useComposerAttachments } from "../../src/uploads";
 import { Card, Logo, SectionLabel, Spinner } from "../../src/ui";
 import { AttachmentTray } from "../../src/ui/attachments";
+import { encodePendingAttachments } from "../../src/pendingRequest";
 
 /** Home — forest hero + floating one-box composer with live deflection. */
 export default function HomeScreen() {
@@ -56,40 +70,42 @@ export default function HomeScreen() {
     staleTime: 5 * 60_000,
   });
 
-  const send = useMutation({
-    mutationFn: () => api.createRequest({ title: text.trim(), channel: "mobile", attachmentIds: att.ids }),
-    onSuccess: (res) => {
-      haptics.success();
-      setText("");
-      setComposerText("");
-      att.clear();
-      router.push(`/request/${res.request.id}`);
-    },
-    onError: () => {
-      // offline: queue the draft and sync later
-      haptics.warning();
-      useDrafts.getState().enqueue(text.trim());
-      setText("");
-      setComposerText("");
-    },
-  });
+  // Navigating (rather than creating the request first) is what lets the
+  // native zoom transition run off this tap: the thread mounts instantly
+  // with the draft, and creates the request itself (see request/[id].tsx) —
+  // the composer only has to snapshot + clear its own state here.
+  const draft = text.trim();
+  const attachmentsParam = encodePendingAttachments(att.attachments);
+  const canSend = draft.length >= 3 && !att.uploading;
+  const clearComposer = () => {
+    setText("");
+    setComposerText("");
+    att.clear();
+  };
 
   // background sync of offline-queued drafts
   useEffect(() => {
-    for (const draft of queue) {
+    for (const queued of queue) {
       api
-        .createRequest({ title: draft.title, channel: "mobile" })
-        .then(() => dequeue(draft.localId))
+        .createRequest({ title: queued.title, channel: "mobile" })
+        .then(() => dequeue(queued.localId))
         .catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const suggestions = deflect?.suggestions ?? [];
-  const canSend = text.trim().length >= 3 && !send.isPending && !att.uploading;
   const openRequests = (mine?.requests ?? []).filter((r) => r.status !== "solved");
   const replyWaiting = openRequests.filter((r) => r.unreadForRequester).length;
   const articles = recent?.articles ?? [];
+
+  // While the keyboard is up, the suggestion list sits underneath it — the
+  // user has no idea deflection found anything. Surface the state inside the
+  // always-visible composer card instead; tapping drops the keyboard so the
+  // suggestions right below come into view.
+  const keyboardUp = useKeyboardVisible();
+  const searching = isFetching && suggestions.length === 0;
+  const showHint = keyboardUp && (suggestions.length > 0 || (searching && (debounced.length >= 8 || att.ids.length > 0)));
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -197,28 +213,44 @@ export default function HomeScreen() {
                 onPress={() => void att.attach("voice")}
               />
               <View style={{ flex: 1 }} />
-              <Pressable
-                onPress={() => {
-                  haptics.tap();
-                  send.mutate();
-                }}
-                disabled={!canSend}
-                style={{
-                  height: 40,
-                  paddingHorizontal: 24,
-                  borderRadius: 999,
-                  backgroundColor: canSend ? colors.primary : colors.sage,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
+              <Link
+                href={{ pathname: "/request/[id]", params: { id: "pending", draft, attachments: attachmentsParam } }}
+                asChild
               >
-                {send.isPending || att.uploading ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Send</Text>
-                )}
-              </Pressable>
+                <Pressable
+                  onPress={() => {
+                    haptics.tap();
+                    clearComposer();
+                  }}
+                  disabled={!canSend}
+                  style={{
+                    height: 40,
+                    paddingHorizontal: 24,
+                    borderRadius: 999,
+                    backgroundColor: canSend ? colors.primary : colors.sage,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Link.AppleZoom>
+                    <View>
+                      {att.uploading ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Send</Text>
+                      )}
+                    </View>
+                  </Link.AppleZoom>
+                </Pressable>
+              </Link>
             </View>
+            {showHint && (
+              <DeflectionHint
+                searching={searching}
+                count={suggestions.length}
+                onPress={() => Keyboard.dismiss()}
+              />
+            )}
           </View>
 
           <View style={{ paddingHorizontal: 16 }}>
@@ -326,6 +358,79 @@ export default function HomeScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
+  );
+}
+
+function useKeyboardVisible(): boolean {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () => setVisible(true));
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return visible;
+}
+
+/**
+ * Inline strip at the bottom of the composer card, shown only while the
+ * keyboard hides the suggestion list below: pulses while deflection searches,
+ * then announces how many known fixes matched. Tapping dismisses the keyboard
+ * so the suggestions scroll into view.
+ */
+function DeflectionHint({ searching, count, onPress }: { searching: boolean; count: number; onPress: () => void }) {
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 0.35, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    if (searching) loop.start();
+    else pulse.setValue(1);
+    return () => loop.stop();
+  }, [searching, pulse]);
+
+  // animate the strip in/out so it doesn't pop while the user types
+  useEffect(() => {
+    LayoutAnimation.configureNext(LayoutAnimation.create(200, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity));
+  }, [searching, count]);
+
+  return (
+    <Pressable
+      onPress={() => {
+        haptics.tap();
+        onPress();
+      }}
+      disabled={searching}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        backgroundColor: colors.mint,
+        borderRadius: radii.md,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        opacity: pressed ? 0.7 : 1,
+      })}
+    >
+      {searching ? (
+        <Animated.Text style={{ opacity: pulse, fontSize: 14, color: colors.primary }}>✦</Animated.Text>
+      ) : (
+        <Text style={{ fontSize: 14, color: colors.primary }}>✦</Text>
+      )}
+      <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.primary }}>
+        {searching
+          ? "Looking for a known fix…"
+          : `${count === 1 ? "A known fix" : `${count} known fixes`} might solve this — take a look`}
+      </Text>
+      {!searching && (
+        <SymbolView name={{ ios: "chevron.down", android: "keyboard_arrow_down" }} size={12} weight="semibold" tintColor={colors.primary} />
+      )}
+    </Pressable>
   );
 }
 

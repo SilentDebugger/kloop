@@ -79,7 +79,14 @@ export type ResolutionView = {
 };
 
 /** Documentation pipeline state for a resolution — what the AI did with it. */
-export type DocState = "working" | "drafted" | "already_documented" | "covered_by_draft" | "skipped" | "failed";
+export type DocState =
+  | "working"
+  | "waiting_confirmation"
+  | "drafted"
+  | "already_documented"
+  | "covered_by_draft"
+  | "skipped"
+  | "failed";
 
 /** One row of the supporter-facing "AI activity" feed. */
 export type AiActivityItem = {

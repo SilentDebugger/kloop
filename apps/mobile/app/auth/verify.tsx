@@ -28,6 +28,9 @@ export default function VerifyDeepLink() {
         await connectWorkspaceFromLink(typeof params.server === "string" ? params.server : null);
         const res = await api.verifyMagicLink(token);
         useConnection.getState().setSession(res.token, res.user);
+        // the deep link pushed this screen onto the existing stack — collapse
+        // that history so swipe-back can't resurface it after landing on home
+        if (router.canDismiss()) router.dismissAll();
         router.replace(res.user.role === "requester" ? "/(requester)" : "/(supporter)/queue");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Verification failed.");
@@ -42,7 +45,14 @@ export default function VerifyDeepLink() {
         {error ? (
           <>
             <ErrorNote>{error}</ErrorNote>
-            <Button title="Back to sign in" variant="secondary" onPress={() => router.replace("/login")} />
+            <Button
+              title="Back to sign in"
+              variant="secondary"
+              onPress={() => {
+                if (router.canDismiss()) router.dismissAll();
+                router.replace("/login");
+              }}
+            />
           </>
         ) : (
           <>

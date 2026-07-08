@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { KloopClient, colors, type DiscoveryDoc } from "@kloop/shared";
 import { useConnection } from "../src/store/connection";
-import { Button, Card, ErrorNote, Input, Logo, Spinner } from "../src/ui";
+import { animateLayout, Button, Card, ErrorNote, Input, Logo, Reveal, Spinner } from "../src/ui";
 
 /**
  * Server connect — enter the workspace domain (or scan the QR from the admin
@@ -24,6 +24,7 @@ export default function ConnectScreen() {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const lookup = (raw: string) => {
+    animateLayout();
     setDoc(null);
     setError(null);
     const trimmed = raw.trim();
@@ -38,6 +39,7 @@ export default function ConnectScreen() {
     setChecking(true);
     KloopClient.discover(normalized)
       .then((d) => {
+        animateLayout();
         setDoc(d);
         setOrigin(normalized);
       })
@@ -47,6 +49,7 @@ export default function ConnectScreen() {
           try {
             const httpOrigin = new URL(`http://${trimmed}`).origin;
             const d = await KloopClient.discover(httpOrigin);
+            animateLayout();
             setDoc(d);
             setOrigin(httpOrigin);
             return;
@@ -54,9 +57,13 @@ export default function ConnectScreen() {
             /* fall through */
           }
         }
+        animateLayout();
         setError("No kloop workspace found at that address.");
       })
-      .finally(() => setChecking(false));
+      .finally(() => {
+        animateLayout();
+        setChecking(false);
+      });
   };
 
   // debounce typing
@@ -89,7 +96,9 @@ export default function ConnectScreen() {
       token: null,
       user: null,
     });
-    router.replace("/login");
+    // push (not replace) so getting to sign-in is a native slide with
+    // swipe-back to re-pick the workspace; login collapses the stack on success
+    router.push("/login");
   };
 
   return (
@@ -116,41 +125,47 @@ export default function ConnectScreen() {
           />
 
           {checking && <Spinner pad={8} />}
-          {error && !checking ? <ErrorNote>{error}</ErrorNote> : null}
+          {error && !checking ? (
+            <Reveal>
+              <ErrorNote>{error}</ErrorNote>
+            </Reveal>
+          ) : null}
 
           {doc && !checking && (
-            <Card style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14 }}>
-              <View
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 12,
-                  backgroundColor: colors.mint,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 17 }}>{doc.org.name[0]?.toUpperCase()}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontWeight: "700", fontSize: 15, color: colors.text }}>{doc.org.name}</Text>
-                <Text style={{ fontSize: 12, color: colors.textSecondary }}>
-                  Found{doc.auth.oidc ? " · SSO enabled" : ""}{doc.auth.magicLink ? " · magic link" : ""}
-                </Text>
-              </View>
-              <View
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 11,
-                  backgroundColor: colors.primary,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>✓</Text>
-              </View>
-            </Card>
+            <Reveal>
+              <Card style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14 }}>
+                <View
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 12,
+                    backgroundColor: colors.mint,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 17 }}>{doc.org.name[0]?.toUpperCase()}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontWeight: "700", fontSize: 15, color: colors.text }}>{doc.org.name}</Text>
+                  <Text style={{ fontSize: 12, color: colors.textSecondary }}>
+                    Found{doc.auth.oidc ? " · SSO enabled" : ""}{doc.auth.magicLink ? " · magic link" : ""}
+                  </Text>
+                </View>
+                <View
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: 11,
+                    backgroundColor: colors.primary,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>✓</Text>
+                </View>
+              </Card>
+            </Reveal>
           )}
         </View>
 

@@ -7,7 +7,7 @@ import { orgSettings, type AppEnv } from "../http/context.js";
 import { nextCounter } from "../lib/counters.js";
 import { recordEvent } from "../lib/events.js";
 import { notifyUser } from "../lib/notify.js";
-import { threadTranscript } from "../lib/thread.js";
+import { addSystemMessage, threadTranscript } from "../lib/thread.js";
 import { bus } from "../realtime/bus.js";
 import { enqueueEmbed, enqueue, QUEUES } from "../workers/queues.js";
 import { getLlmProvider, extractJson } from "../providers/llm/index.js";
@@ -85,21 +85,6 @@ async function loadOwnedRequest(c: Context<AppEnv, any>) {
     return { error: c.json({ error: "not found" }, 404) } as const;
   }
   return { request } as const;
-}
-
-/** Status events rendered inline in the thread ("Maya is now handling this request"). */
-async function addSystemMessage(orgId: string, requestId: string, body: string): Promise<void> {
-  const [message] = await db
-    .insert(tables.messages)
-    .values({ orgId, requestId, kind: "system", body })
-    .returning();
-  bus.publish(orgId, {
-    type: "message_created",
-    data: {
-      requestId,
-      message: { id: message.id, kind: "system", body, author: null, createdAt: message.createdAt },
-    },
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -696,6 +681,32 @@ requestRoutes.post("/:id/confirm", async (c) => {
       .set({ trusted: true })
       .where(eq(tables.resolutions.requestId, request.id));
 
+    // the confirmed fix is now safe to document — release the doc pipeline
+    // for the newest parked resolution (older ones from earlier resolve
+    // attempts are superseded and settle as skipped)
+    const parked = await db
+      .select({ id: tables.resolutions.id })
+      .from(tables.resolutions)
+      .where(and(eq(tables.resolutions.requestId, request.id), eq(tables.resolutions.docState, "waiting_confirmation")))
+      .orderBy(desc(tables.resolutions.createdAt));
+    if (parked[0]) {
+      // docState stays waiting_confirmation until the pipeline settles it —
+      // flipping to "working" here would trip the activity feed's stall
+      // detector, which measures from the resolution's (much older) createdAt
+      await enqueue(QUEUES.articleGen, { resolutionId: parked[0].id });
+      bus.publish(org.id, {
+        type: "ai_activity",
+        supporterOnly: true,
+        data: { resolutionId: parked[0].id, requestId: request.id, state: "working" },
+      });
+    }
+    if (parked.length > 1) {
+      await db
+        .update(tables.resolutions)
+        .set({ docState: "skipped", docNote: "Superseded by a newer resolution on this request." })
+        .where(inArray(tables.resolutions.id, parked.slice(1).map((r) => r.id)));
+    }
+
     await recordEvent(org.id, "user", user.id, "request_confirmed", { requestId: request.id });
     await addSystemMessage(org.id, request.id, `${user.name} confirmed the fix. Request solved.`);
     if (request.claimedBy) {
@@ -724,11 +735,30 @@ requestRoutes.post("/:id/confirm", async (c) => {
     .where(eq(tables.requests.id, request.id))
     .returning();
 
+  // a rejected fix must never become a knowledge-base draft — settle any
+  // resolutions parked on this confirmation. A later re-resolve creates a
+  // fresh resolution that goes through the loop again.
+  const [settled] = await db
+    .update(tables.resolutions)
+    .set({ docState: "skipped", docNote: "The user said this didn't fix it — nothing was documented." })
+    .where(and(eq(tables.resolutions.requestId, request.id), eq(tables.resolutions.docState, "waiting_confirmation")))
+    .returning({ id: tables.resolutions.id });
+  if (settled) {
+    bus.publish(org.id, {
+      type: "ai_activity",
+      supporterOnly: true,
+      data: { resolutionId: settled.id, requestId: request.id, state: "skipped" },
+    });
+  }
+
   await recordEvent(org.id, "user", user.id, "confirmation_rejected", {
     requestId: request.id,
     wasAutoAnswered: request.autoAnswered,
   });
   await addSystemMessage(org.id, request.id, `${user.name} reported the fix didn't help yet.`);
+  if (request.autoAnswered && !request.claimedBy) {
+    await addSystemMessage(org.id, request.id, "Escalated to the support team — a person will pick this up from here.");
+  }
   if (request.claimedBy) {
     await notifyUser({
       orgId: org.id,

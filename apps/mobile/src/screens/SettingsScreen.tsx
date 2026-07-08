@@ -47,6 +47,7 @@ export function SettingsScreen() {
       new Promise((resolve) => setTimeout(resolve, 4000)),
     ]);
     signOutActive();
+    if (router.canDismiss()) router.dismissAll();
     router.replace("/login");
   };
 
@@ -141,6 +142,7 @@ export function SettingsScreen() {
                   haptics.select();
                   setActive(i);
                   const nextUser = workspaces[i]?.user;
+                  if (router.canDismiss()) router.dismissAll();
                   router.replace(!workspaces[i]?.token ? "/login" : nextUser?.role === "requester" ? "/(requester)" : "/(supporter)/queue");
                 }
               }}
