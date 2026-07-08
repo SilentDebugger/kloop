@@ -30,6 +30,10 @@ export class MockLlmProvider implements LlmProvider {
         return JSON.stringify(this.autoTag(opts.data ?? {}));
       case "resolution_draft":
         return JSON.stringify(this.resolutionDraft(opts.data ?? {}));
+      case "capture_split":
+        return JSON.stringify(this.captureSplit(opts.data ?? {}));
+      case "capture_draft":
+        return JSON.stringify(this.captureDraft(opts.data ?? {}));
       default:
         return opts.json ? "{}" : "ok";
     }
@@ -205,6 +209,41 @@ export class MockLlmProvider implements LlmProvider {
     const title = String(data.title ?? "the issue");
     if (steps.length === 0) return { draft: `Resolved "${title}" — see thread for details.` };
     return { draft: [`Fixed "${title}".`, ...steps.map((s) => (s.endsWith(".") ? s : `${s}.`))].join("\n") };
+  }
+
+  private captureSplit(data: Record<string, unknown>): unknown {
+    const raw = String(data.raw ?? "");
+    // bullet/dash lines are treated as one topic each; free prose becomes one topic
+    const lines = raw
+      .split("\n")
+      .map((l) => l.trim().replace(/^[-–—*•\d.)\s]+/, ""))
+      .filter((l) => l.length > 3);
+    const chunks = lines.length > 1 ? lines.slice(0, 6) : [raw.trim() || "Untitled note"];
+    return {
+      topics: chunks.map((c) => ({
+        title: c.length > 70 ? `${c.slice(0, 67)}…` : c,
+        kind: /step|how|install|setup|configure/i.test(c) ? "how-to" : /new starter|onboard|first day/i.test(c) ? "onboarding" : "good-to-know",
+        summary: c,
+        sourceHint: "from notes",
+      })),
+    };
+  }
+
+  private captureDraft(data: Record<string, unknown>): unknown {
+    const title = String(data.title ?? "Untitled");
+    const notes = String(data.notes ?? "");
+    const steps = this.sentences(notes).map((s) => (s.endsWith(".") ? s : `${s}.`));
+    return {
+      title,
+      summary: steps[0] ?? title,
+      blocks: [
+        {
+          kind: "notes",
+          contentMd: steps.length > 0 ? steps.map((s) => `- ${s}`).join("\n") : `- ${title}`,
+        },
+      ],
+      confidence: 0.6,
+    };
   }
 
   private autoAnswer(data: Record<string, unknown>): unknown {

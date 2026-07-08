@@ -443,6 +443,41 @@ export const reviewItems = pgTable(
   (t) => [index("review_items_org_status_idx").on(t.orgId, t.status)],
 );
 
+/** One topic found inside a knowledge capture — mirrors the pipeline state per draft. */
+export type DocCaptureTopic = {
+  id: string;
+  title: string;
+  kind: "how-to" | "onboarding" | "good-to-know" | "other";
+  summary: string;
+  /** e.g. "from notes + photo" — where this topic's substance came from */
+  sourceHint: string;
+  status: "pending" | "drafted" | "covered" | "failed" | "discarded";
+  articleId?: string;
+  /** "KB-041 · VPN drops on hotel Wi-Fi" when status is covered */
+  coveredByLabel?: string;
+};
+
+/**
+ * Knowledge captures: a supporter brain-dump (text + photos + voice memos)
+ * that the doc-gen pipeline splits into one or more draft articles. Drafts
+ * only enter the review inbox once the author submits the results.
+ */
+export const docCaptures = pgTable(
+  "doc_captures",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by").notNull().references(() => users.id, { onDelete: "cascade" }),
+    rawText: text("raw_text").notNull().default(""),
+    status: text("status").notNull().default("queued"), // queued | reading | drafting | ready | submitted | cancelled | failed
+    topics: jsonb("topics").$type<DocCaptureTopic[]>().notNull().default([]),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("doc_captures_org_idx").on(t.orgId, t.status)],
+);
+
 // ---------------------------------------------------------------------------
 // Attachments, events, notifications, integration surface
 // ---------------------------------------------------------------------------

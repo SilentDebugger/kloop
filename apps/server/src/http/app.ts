@@ -20,6 +20,7 @@ import { notificationRoutes } from "../routes/notifications.js";
 import { searchRoutes } from "../routes/search.js";
 import { deflectRoutes } from "../routes/deflect.js";
 import { articleRoutes } from "../routes/articles.js";
+import { captureRoutes } from "../routes/captures.js";
 import { reviewRoutes } from "../routes/reviews.js";
 import { insightRoutes } from "../routes/insights.js";
 import { intakeRoutes } from "../routes/intake.js";
@@ -76,6 +77,7 @@ function registerLazyRoutes(api: Hono<AppEnv>) {
   api.route("/search", searchRoutes);
   api.route("/deflect", deflectRoutes);
   api.route("/articles", articleRoutes);
+  api.route("/captures", captureRoutes);
   api.route("/reviews", reviewRoutes);
   api.route("/insights", insightRoutes);
   api.route("/intake", intakeRoutes);

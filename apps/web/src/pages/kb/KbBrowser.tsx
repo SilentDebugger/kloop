@@ -9,7 +9,8 @@ import { timeAgo } from "../../lib/format";
 import { PageHeader } from "../../shell/AppShell";
 import { Button, Card, Chip, EmptyState, ErrorState, Input, Segmented, Spinner } from "../../ui";
 import { MediaQueryBar, useComposerAttachments } from "../../ui/attachments";
-import { IconChevron, IconPlus } from "../../ui/icons";
+import { IconChevron, IconPlus, IconSparkle } from "../../ui/icons";
+import { NewDocSheet } from "./NewDocSheet";
 
 /**
  * KB browser (requester) / KB manager (supporter). Typing (or attaching a
@@ -23,6 +24,7 @@ export function KbBrowserPage() {
   const supporter = roleIsSupporter(user);
 
   const [tag, setTag] = useState<string | null>(null);
+  const [newDocOpen, setNewDocOpen] = useState(false);
   const [status, setStatus] = useState<"published" | "draft" | "archived" | "all">("published");
   const [search, setSearch] = useState("");
   const [q, setQ] = useState("");
@@ -60,12 +62,18 @@ export function KbBrowserPage() {
         title={t("nav.knowledgeBase")}
         right={
           supporter ? (
-            <Button size="sm" variant="secondary" onClick={() => navigate("/kb/new")}>
-              <IconPlus size={15} /> New
-            </Button>
+            <span className="flex items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={() => navigate("/kb/new")}>
+                <IconPlus size={15} /> New
+              </Button>
+              <Button size="sm" onClick={() => setNewDocOpen(true)}>
+                <IconSparkle size={15} /> New doc
+              </Button>
+            </span>
           ) : undefined
         }
       />
+      {supporter && <NewDocSheet open={newDocOpen} onClose={() => setNewDocOpen(false)} />}
 
       <Input placeholder="Search articles — text, photo, or voice…" value={search} onChange={(e) => setSearch(e.target.value)} className="shadow-card !border-transparent" />
       <div className="mb-3">

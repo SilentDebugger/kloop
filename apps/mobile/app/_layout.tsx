@@ -146,6 +146,9 @@ function AuthGate() {
       <Stack.Protected guard={authed && !isRequester}>
         <Stack.Screen name="(supporter)" />
         {/* log a request for a user or guest — same native sheet as resolve */}
+        {/* knowledge capture — standard push; the Link.AppleZoom morph from the
+            Knowledge tab's "New doc" pill drives the presentation */}
+        <Stack.Screen name="new-doc" />
         <Stack.Screen
           name="new-request"
           options={{

@@ -11,6 +11,7 @@ export const QUEUES = {
   autoAnswer: "auto-answer",
   autoCloseScan: "auto-close-scan",
   autoTag: "auto-tag",
+  docGen: "doc-gen",
 } as const;
 
 export type EmbedJob = {

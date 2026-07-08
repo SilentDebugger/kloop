@@ -149,6 +149,29 @@ export type SearchResults = {
   pendingAttachments: number;
 };
 
+/** One topic the doc-gen pipeline found inside a knowledge capture. */
+export type DocCaptureTopicView = {
+  id: string;
+  title: string;
+  kind: "how-to" | "onboarding" | "good-to-know" | "other";
+  summary: string;
+  sourceHint: string;
+  status: "pending" | "drafted" | "covered" | "failed" | "discarded";
+  articleId?: string;
+  coveredByLabel?: string;
+};
+
+/** A supporter knowledge brain-dump being split into draft articles. */
+export type DocCaptureView = {
+  id: string;
+  status: "queued" | "reading" | "drafting" | "ready" | "submitted" | "cancelled" | "failed";
+  rawText: string;
+  topics: DocCaptureTopicView[];
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ArticleListItem = {
   id: string;
   kb: string;

@@ -8,9 +8,12 @@ export type QueuedDraft = { localId: string; title: string; queuedAt: string };
 type DraftState = {
   composerText: string;
   captureText: Record<string, string>; // requestId -> in-progress capture
+  /** knowledge-capture notes ("New doc") — survives close / "Save for later" */
+  docCaptureText: string;
   queue: QueuedDraft[];
   setComposerText: (t: string) => void;
   setCaptureText: (requestId: string, t: string) => void;
+  setDocCaptureText: (t: string) => void;
   enqueue: (title: string) => void;
   dequeue: (localId: string) => void;
 };
@@ -20,9 +23,11 @@ export const useDrafts = create<DraftState>()(
     (set) => ({
       composerText: "",
       captureText: {},
+      docCaptureText: "",
       queue: [],
       setComposerText: (composerText) => set({ composerText }),
       setCaptureText: (requestId, t) => set((s) => ({ captureText: { ...s.captureText, [requestId]: t } })),
+      setDocCaptureText: (docCaptureText) => set({ docCaptureText }),
       enqueue: (title) =>
         set((s) => ({
           queue: [...s.queue, { localId: `${Date.now()}-${Math.random().toString(36).slice(2)}`, title, queuedAt: new Date().toISOString() }],

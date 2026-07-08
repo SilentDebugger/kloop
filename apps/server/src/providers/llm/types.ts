@@ -26,7 +26,9 @@ export interface CompleteOptions {
     | "cluster_label"
     | "auto_answer"
     | "auto_tag"
-    | "resolution_draft";
+    | "resolution_draft"
+    | "capture_split"
+    | "capture_draft";
   data?: Record<string, unknown>;
 }
 

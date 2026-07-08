@@ -10,6 +10,7 @@ import type {
   AuthMethods,
   DeflectionSuggestion,
   DiscoveryDoc,
+  DocCaptureView,
   MessageView,
   NotificationView,
   OnboardingStatus,
@@ -244,6 +245,20 @@ export class KloopClient {
   }
   archiveArticle(id: string, redirectToArticleId: string | null = null) {
     return this.post<{ ok: true }>(`/api/articles/${id}/archive`, { redirectToArticleId });
+  }
+
+  // ---- knowledge captures ----
+  createDocCapture(input: { text?: string; attachmentIds?: string[] }) {
+    return this.post<{ capture: DocCaptureView }>("/api/captures", input);
+  }
+  docCapture(id: string) {
+    return this.get<{ capture: DocCaptureView }>(`/api/captures/${id}`);
+  }
+  submitDocCapture(id: string, discardArticleIds: string[] = []) {
+    return this.post<{ ok: true; submitted: number; capture: DocCaptureView }>(`/api/captures/${id}/submit`, { discardArticleIds });
+  }
+  cancelDocCapture(id: string) {
+    return this.post<{ ok: true }>(`/api/captures/${id}/cancel`);
   }
 
   // ---- reviews ----

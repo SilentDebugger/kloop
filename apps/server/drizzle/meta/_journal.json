@@ -43,6 +43,13 @@
       "when": 1783418262497,
       "tag": "0005_redundant_landau",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783531652124,
+      "tag": "0006_glorious_doorman",
+      "breakpoints": true
     }
   ]
 }

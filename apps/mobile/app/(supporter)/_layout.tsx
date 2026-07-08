@@ -29,6 +29,10 @@ export default function SupporterTabs() {
         <Trigger.Label>Reviews</Trigger.Label>
         <Trigger.Badge hidden={reviewBadge === 0}>{reviewBadge > 0 ? String(reviewBadge) : undefined}</Trigger.Badge>
       </Trigger>
+      <Trigger name="knowledge" contentStyle={{ backgroundColor: colors.background }}>
+        <Trigger.Icon sf={{ default: "book", selected: "book.fill" }} md="menu_book" />
+        <Trigger.Label>Knowledge</Trigger.Label>
+      </Trigger>
       <Trigger name="my-work" contentStyle={{ backgroundColor: colors.background }}>
         <Trigger.Icon sf={{ default: "briefcase", selected: "briefcase.fill" }} md="work" />
         <Trigger.Label>My work</Trigger.Label>
