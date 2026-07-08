@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Platform, View } from "react-native";
 import { featureFlags } from "react-native-screens";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { colors } from "@kloop/shared";
 import { useRealtime } from "../src/realtime";
 import { registerPush } from "../src/push";
+import { captureSheet, useActiveDocCapture } from "../src/docCapture";
 import { useConnection, useStoreHydrated } from "../src/store/connection";
 
 const queryClient = new QueryClient({
@@ -35,8 +36,45 @@ function toMobileRoute(link: unknown): string | null {
   if (typeof link !== "string" || !link.startsWith("/")) return null;
   const request = /^\/requests?\/([A-Za-z0-9_-]+)/.exec(link);
   if (request) return `/request/${request[1]}`;
+  const capture = /^\/captures\/([A-Za-z0-9_-]+)/.exec(link);
+  if (capture) return `/doc-capture/${capture[1]}`;
   if (link.startsWith("/reviews")) return "/(supporter)/reviews";
   if (link.startsWith("/kb")) return "/kb";
+  return null;
+}
+
+/**
+ * Headless follower of the server's active knowledge capture. Keeps the shared
+ * /captures/active poll running app-wide, and when generation settles (ready /
+ * failed) with the doc-capture sheet closed it re-presents the sheet — at most
+ * once per capture+outcome per app session, so a deliberate dismissal isn't
+ * nagged. A fresh cold start observes the settled capture again and reopens.
+ */
+function ActiveCaptureWatcher() {
+  const router = useRouter();
+  const hydrated = useStoreHydrated();
+  const workspaces = useConnection((s) => s.workspaces);
+  const activeIndex = useConnection((s) => s.activeIndex);
+  const ws = workspaces[activeIndex] ?? null;
+  // the doc-capture sheet lives in the supporter-protected group — a push
+  // for anyone else would be silently swallowed by the guard
+  const isSupporter = hydrated && !!ws?.token && !!ws?.user && ws.user.role !== "requester";
+
+  const { data } = useActiveDocCapture(isSupporter);
+  const capture = data?.capture ?? null;
+  const status = capture?.status;
+  const openedFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!capture || (status !== "ready" && status !== "failed")) return;
+    const key = `${capture.id}:${status}`;
+    if (openedFor.current === key) return;
+    openedFor.current = key;
+    if (captureSheet.isPresented()) return;
+    router.push(`/doc-capture/${capture.id}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capture?.id, status]);
+
   return null;
 }
 
@@ -45,6 +83,7 @@ export default function RootLayout() {
     <KeyboardProvider>
       <QueryClientProvider client={queryClient}>
         <StatusBar style="dark" />
+        <ActiveCaptureWatcher />
         <AuthGate />
       </QueryClientProvider>
     </KeyboardProvider>
@@ -149,6 +188,19 @@ function AuthGate() {
         {/* knowledge capture — standard push; the Link.AppleZoom morph from the
             Knowledge tab's "New doc" pill drives the presentation */}
         <Stack.Screen name="new-doc" />
+        {/* live generation progress + results for a capture — a true bottom
+            sheet (half height, expandable) so the screen behind stays visible;
+            generation continues server-side while it's dismissed */}
+        <Stack.Screen
+          name="doc-capture/[id]"
+          options={{
+            presentation: "formSheet",
+            sheetAllowedDetents: [0.62, 0.95],
+            sheetInitialDetentIndex: 0,
+            sheetGrabberVisible: true,
+            sheetCornerRadius: 24,
+          }}
+        />
         <Stack.Screen
           name="new-request"
           options={{

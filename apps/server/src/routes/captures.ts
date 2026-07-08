@@ -74,6 +74,26 @@ captureRoutes.post("/", async (c) => {
   return c.json({ capture: captureView(capture) }, 201);
 });
 
+/**
+ * The caller's capture-in-progress (or finished-but-unacknowledged one), if
+ * any. Drives the mobile resume pill / auto-reopening sheet — the server is
+ * the source of truth so a reinstall or second device can't get out of sync.
+ * Declared before /:id so "active" isn't swallowed by the param route.
+ */
+captureRoutes.get("/active", async (c) => {
+  const org = c.get("org");
+  const user = c.get("user");
+  const capture = await db.query.docCaptures.findFirst({
+    where: and(
+      eq(tables.docCaptures.orgId, org.id),
+      eq(tables.docCaptures.createdBy, user.id),
+      inArray(tables.docCaptures.status, ["queued", "reading", "drafting", "ready", "failed"]),
+    ),
+    orderBy: (t, { desc }) => desc(t.createdAt),
+  });
+  return c.json({ capture: capture ? captureView(capture) : null });
+});
+
 captureRoutes.get("/:id", async (c) => {
   const org = c.get("org");
   const user = c.get("user");

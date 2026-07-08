@@ -6,6 +6,7 @@ import { getLlmProvider, extractJson } from "../providers/llm/index.js";
 import { searchArticles } from "../search/hybrid.js";
 import { createArticleWithRevision, type BlockInput } from "./articles.js";
 import { recordEvent } from "../lib/events.js";
+import { notifyUser } from "../lib/notify.js";
 import { enqueue, QUEUES } from "../workers/queues.js";
 import { logger } from "../lib/logger.js";
 
@@ -45,6 +46,19 @@ async function articleLabel(articleId: string): Promise<string> {
   return rev ? `${kb} · ${rev.title}` : kb;
 }
 
+/** Mark a capture failed and tell the author — they may have closed the app. */
+async function failCapture(capture: typeof tables.docCaptures.$inferSelect, message: string): Promise<void> {
+  await setCapture(capture.id, { status: "failed", error: message });
+  await notifyUser({
+    orgId: capture.orgId,
+    userId: capture.createdBy,
+    type: "system",
+    title: "Couldn't draft your docs",
+    body: message,
+    linkPath: `/captures/${capture.id}`,
+  });
+}
+
 /** Archive any draft articles a cancelled capture already produced. */
 export async function archiveCaptureDrafts(capture: typeof tables.docCaptures.$inferSelect): Promise<void> {
   for (const topic of capture.topics) {
@@ -71,10 +85,7 @@ export async function generateDocsFromCapture(job: DocGenJob): Promise<void> {
     await run(capture, job.attempt ?? 0);
   } catch (err) {
     logger.error("doc capture generation failed", { captureId: job.captureId, err: String(err) });
-    await setCapture(capture.id, {
-      status: "failed",
-      error: "Something went wrong while structuring your notes — they're saved, try again in a moment.",
-    }).catch(() => {});
+    await failCapture(capture, "Something went wrong while structuring your notes — they're saved, try again in a moment.").catch(() => {});
   }
 }
 
@@ -127,7 +138,7 @@ async function run(capture: typeof tables.docCaptures.$inferSelect, attempt: num
     split = extractJson<SplitJson>(splitRaw);
   } catch (err) {
     logger.error("capture split JSON parse failed", { captureId: capture.id, err: String(err) });
-    await setCapture(capture.id, { status: "failed", error: "Couldn't make sense of the notes — try adding a bit more detail." });
+    await failCapture(capture, "Couldn't make sense of the notes — try adding a bit more detail.");
     return;
   }
 
@@ -144,7 +155,7 @@ async function run(capture: typeof tables.docCaptures.$inferSelect, attempt: num
     }));
 
   if (topics.length === 0) {
-    await setCapture(capture.id, { status: "failed", error: "No documentable topics found — try adding a bit more detail." });
+    await failCapture(capture, "No documentable topics found — try adding a bit more detail.");
     return;
   }
 
@@ -168,11 +179,36 @@ async function run(capture: typeof tables.docCaptures.$inferSelect, attempt: num
     await setCapture(capture.id, { topics });
   }
 
+  // a cancel may have landed while the last topic was drafting — don't
+  // resurrect the capture (and ping the author) with a "ready" overwrite
+  const latest = await db.query.docCaptures.findFirst({ where: eq(tables.docCaptures.id, capture.id) });
+  if (!latest || latest.status === "cancelled") {
+    if (latest) await archiveCaptureDrafts({ ...latest, topics });
+    return;
+  }
+
   await setCapture(capture.id, { status: "ready", topics });
+  const drafted = topics.filter((t) => t.status === "drafted").length;
+  const covered = topics.filter((t) => t.status === "covered").length;
   await recordEvent(capture.orgId, "ai", null, "doc_capture_drafted", {
     captureId: capture.id,
     topics: topics.length,
-    drafted: topics.filter((t) => t.status === "drafted").length,
+    drafted,
+  });
+  // the author may have dismissed the progress sheet or closed the app —
+  // "system" type so this is always delivered regardless of prefs
+  await notifyUser({
+    orgId: capture.orgId,
+    userId: capture.createdBy,
+    type: "system",
+    title: drafted > 0 ? `${drafted} draft${drafted === 1 ? "" : "s"} ready to review` : "Your capture is done",
+    body:
+      drafted > 0
+        ? "Your notes are structured — skim the drafts and send them to review."
+        : covered > 0
+          ? "Everything in your notes is already documented."
+          : "Nothing documentable came out of this capture — the notes are saved.",
+    linkPath: `/captures/${capture.id}`,
   });
 }
 

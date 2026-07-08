@@ -254,6 +254,10 @@ export class KloopClient {
   docCapture(id: string) {
     return this.get<{ capture: DocCaptureView }>(`/api/captures/${id}`);
   }
+  /** The caller's in-flight (or finished-but-unacknowledged) capture, if any. */
+  activeDocCapture() {
+    return this.get<{ capture: DocCaptureView | null }>("/api/captures/active");
+  }
   submitDocCapture(id: string, discardArticleIds: string[] = []) {
     return this.post<{ ok: true; submitted: number; capture: DocCaptureView }>(`/api/captures/${id}/submit`, { discardArticleIds });
   }

@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import { api } from "./api";
+import { captureSheet } from "./docCapture";
 
 /** Device push token from the last successful registration — needed for delete-on-logout. */
 let currentToken: string | null = null;
@@ -11,14 +12,21 @@ let currentToken: string | null = null;
 export async function registerPush(): Promise<void> {
   try {
     const Notifications = await import("expo-notifications");
-    // show pushes as banners while the app is foregrounded too
+    // show pushes as banners while the app is foregrounded too — except a
+    // capture-finished push while its sheet is already on screen (the sheet
+    // itself just flipped to the results, a banner would be noise)
     Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: false,
-        shouldSetBadge: false,
-      }),
+      handleNotification: async (notification) => {
+        const link = notification.request.content.data?.linkPath;
+        const isCapturePush = typeof link === "string" && link.startsWith("/captures/");
+        const suppress = isCapturePush && captureSheet.isPresented();
+        return {
+          shouldShowBanner: !suppress,
+          shouldShowList: !suppress,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
+        };
+      },
     });
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync("default", {
